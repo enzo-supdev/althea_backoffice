@@ -1,0 +1,938 @@
+{
+  "info": {
+    "_postman_id": "9f2fcf95-61f4-4e80-8bf8-d2f33c3cbe67",
+    "name": "Althea Systems API v1",
+    "description": "Collection Postman générée depuis API_INTEGRATION_GUIDE.md.\n\nBase URL: https://api-pslt.matheovieilleville.fr\nPrefix: /api/v1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.collectionVariables.get('baseUrl')) pm.collectionVariables.set('baseUrl', 'https://api-pslt.matheovieilleville.fr');",
+          "if (!pm.collectionVariables.get('apiPrefix')) pm.collectionVariables.set('apiPrefix', '/api/v1');"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "https://api-pslt.matheovieilleville.fr" },
+    { "key": "apiPrefix", "value": "/api/v1" },
+    { "key": "accessToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "adminAccessToken", "value": "" },
+    { "key": "userId", "value": "" },
+    { "key": "productId", "value": "" },
+    { "key": "productSlug", "value": "" },
+    { "key": "categoryId", "value": "" },
+    { "key": "categorySlug", "value": "" },
+    { "key": "addressId", "value": "" },
+    { "key": "cartItemId", "value": "" },
+    { "key": "checkoutSessionId", "value": "" },
+    { "key": "paymentIntentId", "value": "" },
+    { "key": "orderId", "value": "" },
+    { "key": "invoiceId", "value": "" },
+    { "key": "mediaRef", "value": "" },
+    { "key": "messageId", "value": "" },
+    { "key": "chatbotSessionId", "value": "" },
+    { "key": "slideId", "value": "" },
+    { "key": "bannerId", "value": "" },
+    { "key": "legalType", "value": "cgu" },
+    { "key": "email", "value": "test.user@example.com" },
+    { "key": "password", "value": "Password123" },
+    { "key": "verificationToken", "value": "" },
+    { "key": "resetToken", "value": "" },
+    { "key": "shippingMethodId", "value": "" },
+    { "key": "paymentMethodId", "value": "" },
+    { "key": "contactMessageId", "value": "" },
+    { "key": "adminUserId", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jean\",\n  \"lastName\": \"Dupont\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/register"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201/200', function () { pm.expect([200,201]).to.include(pm.response.code); });",
+                  "const json = pm.response.json();",
+                  "if (json?.data?.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "if (json?.data?.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "if (json?.data?.user?.id) pm.collectionVariables.set('userId', json.data.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify Email",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/verify-email/{{verificationToken}}"
+          }
+        },
+        {
+          "name": "Resend Verification",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{email}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/resend-verification"
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/login"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', function () { pm.response.to.have.status(200); });",
+                  "const json = pm.response.json();",
+                  "if (json?.data?.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "if (json?.data?.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "if (json?.data?.user?.id) pm.collectionVariables.set('userId', json.data.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/logout"
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/refresh-token"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json?.data?.accessToken) pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "if (json?.data?.refreshToken) pm.collectionVariables.set('refreshToken', json.data.refreshToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forgot Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"{{email}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/forgot-password"
+          }
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"password\": \"NewPassword123\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/reset-password/{{resetToken}}"
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"NewPassword123\"\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/auth/change-password"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        { "name": "Get Me", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/users/me" } },
+        {
+          "name": "Update Me",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"firstName\": \"Jean\",\n  \"lastName\": \"Dupont\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/users/me"
+          }
+        },
+        {
+          "name": "Update Email",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"new.email@example.com\",\n  \"password\": \"{{password}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/users/me/email"
+          }
+        },
+        { "name": "My Orders", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/users/me/orders?page=1&limit=20" } },
+        { "name": "My Invoices", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/users/me/invoices?page=1&limit=20" } },
+        { "name": "My Addresses", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/users/me/addresses" } },
+        {
+          "name": "Create Address",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jean\",\n  \"lastName\": \"Dupont\",\n  \"address1\": \"123 Rue de la Paix\",\n  \"city\": \"Paris\",\n  \"region\": \"Ile-de-France\",\n  \"postalCode\": \"75001\",\n  \"country\": \"FR\",\n  \"phone\": \"+33612345678\",\n  \"isDefault\": true\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/users/me/addresses"
+          }
+        },
+        {
+          "name": "Update Address",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"city\": \"Lyon\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/users/me/addresses/{{addressId}}"
+          }
+        },
+        { "name": "Delete Address", "request": { "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/users/me/addresses/{{addressId}}" } },
+        { "name": "My Payment Methods", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/users/me/payment-methods" } },
+        {
+          "name": "Create Payment Method",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"stripePaymentMethodId\": \"pm_xxx\",\n  \"cardholderName\": \"Jean Dupont\",\n  \"isDefault\": true\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/users/me/payment-methods"
+          }
+        },
+        { "name": "Set Default Payment Method", "request": { "method": "PUT", "url": "{{baseUrl}}{{apiPrefix}}/users/me/payment-methods/{{paymentMethodId}}/default" } },
+        { "name": "Delete Payment Method", "request": { "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/users/me/payment-methods/{{paymentMethodId}}" } }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        { "name": "Public List", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/products?page=1&limit=20" } },
+        { "name": "Top Products", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/products/top" } },
+        { "name": "Get By Slug", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/products/{{productSlug}}" } },
+        { "name": "Similar Products", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/products/{{productId}}/similar" } },
+        { "name": "By Category", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/products/category/{{categorySlug}}?page=1&limit=20" } },
+
+        {
+          "name": "Admin List",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin?page=1&limit=20"
+          }
+        },
+        {
+          "name": "Admin Export CSV",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/export"
+          }
+        },
+        {
+          "name": "Admin Export Advanced",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/export/advanced?format=csv"
+          }
+        },
+        {
+          "name": "Admin Get By Id",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "GET",
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}"
+          }
+        },
+        {
+          "name": "Admin Create Product",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Produit test\",\n  \"slug\": \"produit-test\",\n  \"description\": \"Description\",\n  \"categoryId\": \"{{categoryId}}\",\n  \"priceHt\": 29.99,\n  \"vatRate\": 20,\n  \"stock\": 50,\n  \"status\": \"draft\"\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin"
+          }
+        },
+        {
+          "name": "Admin Duplicate Product",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"copyImages\": false,\n  \"copyVariants\": false\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}/duplicate"
+          }
+        },
+        {
+          "name": "Admin Update Product",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Produit mis a jour\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}"
+          }
+        },
+        {
+          "name": "Admin Update Stock",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"stock\": 100,\n  \"operation\": \"set\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}/stock"
+          }
+        },
+        {
+          "name": "Admin Patch Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"published\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}/status"
+          }
+        },
+        {
+          "name": "Admin Delete Product",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}"
+          }
+        },
+        {
+          "name": "Admin Bulk Delete",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"productIds\": [\"{{productId}}\"]\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/bulk"
+          }
+        },
+        {
+          "name": "Admin Bulk Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"productIds\": [\"{{productId}}\"],\n  \"status\": \"published\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/bulk/status"
+          }
+        },
+        {
+          "name": "Admin Bulk Category",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"productIds\": [\"{{productId}}\"],\n  \"categoryId\": \"{{categoryId}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/bulk/category"
+          }
+        },
+        {
+          "name": "Admin Add Product Image",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"imageRef\": \"{{mediaRef}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}/images"
+          }
+        },
+        {
+          "name": "Admin Delete Product Image",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}/images/{{cartItemId}}"
+          }
+        },
+        {
+          "name": "Admin Reorder Product Images",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"images\": [\n    { \"id\": \"{{cartItemId}}\", \"displayOrder\": 0 }\n  ]\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/products/admin/{{productId}}/images/reorder"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        { "name": "Public List", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/categories" } },
+        { "name": "Get By Slug", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/categories/{{categorySlug}}" } },
+        { "name": "Admin List", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/categories/admin" } },
+        {
+          "name": "Admin Create",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Electronique\",\n  \"slug\": \"electronique\",\n  \"status\": \"active\",\n  \"displayOrder\": 0\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/categories/admin"
+          }
+        },
+        {
+          "name": "Admin Update",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Electronique et accessoires\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/categories/admin/{{categoryId}}"
+          }
+        },
+        { "name": "Admin Delete", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/categories/admin/{{categoryId}}" } },
+        {
+          "name": "Admin Patch Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"active\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/categories/admin/{{categoryId}}/status"
+          }
+        },
+        {
+          "name": "Admin Reorder",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"categories\": [\n    { \"id\": \"{{categoryId}}\", \"displayOrder\": 0 }\n  ]\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/categories/admin/reorder"
+          }
+        },
+        {
+          "name": "Admin Set Image",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"imageRef\": \"{{mediaRef}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/categories/admin/{{categoryId}}/image"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cart",
+      "item": [
+        { "name": "Get Cart", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/cart" } },
+        { "name": "Get Cart Summary", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/cart/summary" } },
+        {
+          "name": "Add Item",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 1\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/cart/items"
+          }
+        },
+        {
+          "name": "Update Item Quantity",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"quantity\": 2\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/cart/items/{{cartItemId}}"
+          }
+        },
+        { "name": "Delete Item", "request": { "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/cart/items/{{cartItemId}}" } },
+        { "name": "Clear Cart", "request": { "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/cart" } },
+        {
+          "name": "Merge Anonymous Cart",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"anonymousCartItems\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"quantity\": 1\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/cart/merge"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Checkout",
+      "item": [
+        { "name": "Validate Cart", "request": { "method": "POST", "url": "{{baseUrl}}{{apiPrefix}}/checkout/validate" } },
+        { "name": "Shipping Options", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/checkout/shipping-options" } },
+        {
+          "name": "Create Shipping Session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"addressId\": \"{{addressId}}\",\n  \"shippingMethodId\": \"{{shippingMethodId}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/checkout/shipping"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json?.data?.sessionId) pm.collectionVariables.set('checkoutSessionId', json.data.sessionId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Calculate Total",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"shippingMethodId\": \"{{shippingMethodId}}\",\n  \"couponCode\": \"PROMO10\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/checkout/calculate-total"
+          }
+        },
+        {
+          "name": "Apply Coupon",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"sessionId\": \"{{checkoutSessionId}}\",\n  \"couponCode\": \"PROMO10\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/checkout/apply-coupon"
+          }
+        },
+        {
+          "name": "Create Payment Intent",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"sessionId\": \"{{checkoutSessionId}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/checkout/payment-intent"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json?.data?.paymentIntentId) pm.collectionVariables.set('paymentIntentId', json.data.paymentIntentId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Confirm Payment",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"paymentIntentId\": \"{{paymentIntentId}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/checkout/confirm"
+          }
+        },
+        { "name": "Get Session", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/checkout/session/{{checkoutSessionId}}" } },
+        { "name": "Cancel Session", "request": { "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/checkout/session" } },
+        { "name": "Payment Methods", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/checkout/payment-methods" } },
+        {
+          "name": "Stripe Webhook (manual test)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Stripe-Signature", "value": "t=123,v1=signature" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/checkout/webhook"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        { "name": "My Orders", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/orders/me?page=1&limit=10" } },
+        { "name": "Get Order", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/orders/{{orderId}}" } },
+        { "name": "Cancel Order", "request": { "method": "POST", "url": "{{baseUrl}}{{apiPrefix}}/orders/{{orderId}}/cancel" } },
+        {
+          "name": "Legacy Checkout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"addressId\": \"{{addressId}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/orders/checkout"
+          }
+        },
+
+        { "name": "Admin Orders List", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/orders/admin?page=1&limit=20" } },
+        { "name": "Admin Export CSV", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/orders/admin/export" } },
+        { "name": "Admin Get Order", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/orders/admin/{{orderId}}" } },
+        {
+          "name": "Admin Update Order Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"processing\",\n  \"comment\": \"Traitement en cours\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/orders/admin/{{orderId}}/status"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invoices",
+      "item": [
+        { "name": "My Invoices", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/invoices/me?page=1&limit=20" } },
+        { "name": "Get Invoice", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/invoices/{{invoiceId}}" } },
+        { "name": "Download Invoice PDF", "request": { "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/invoices/{{invoiceId}}/pdf" } },
+
+        { "name": "Admin Invoices List", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/invoices/admin?page=1&limit=20" } },
+        { "name": "Admin Export", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/invoices/admin/export?format=csv" } },
+        { "name": "Admin Get Invoice", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/invoices/admin/{{invoiceId}}" } },
+        {
+          "name": "Admin Create Credit Note",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"amount\": 10.0,\n  \"reason\": \"refund\",\n  \"notes\": \"Avoir test\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/invoices/admin/{{invoiceId}}/credit-note"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        { "name": "Search Products", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/search/products?q=test&page=1&limit=20" } },
+        { "name": "Suggestions", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/search/suggest?q=te&limit=10" } }
+      ]
+    },
+    {
+      "name": "Media",
+      "item": [
+        {
+          "name": "Upload File",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/media/upload"
+          }
+        },
+        { "name": "Get File By Ref", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/media/{{mediaRef}}" } },
+        { "name": "Admin Delete File", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/media/{{mediaRef}}" } },
+        {
+          "name": "Admin Bulk Upload",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/media/admin/bulk-upload"
+          }
+        },
+        { "name": "Admin List All Media", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/media/admin/all?page=1&limit=20" } }
+      ]
+    },
+    {
+      "name": "Contact",
+      "item": [
+        {
+          "name": "Submit Contact",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"subject\": \"Question produit\",\n  \"message\": \"Bonjour, je souhaite en savoir plus sur ce produit.\"\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/contact/submit"
+          }
+        },
+        { "name": "Admin List Messages", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/contact/admin/messages?page=1&limit=20" } },
+        { "name": "Admin Get Message", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/contact/admin/messages/{{contactMessageId}}" } },
+        {
+          "name": "Admin Update Message Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"read\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/contact/admin/messages/{{contactMessageId}}/status"
+          }
+        },
+        { "name": "Admin Delete Message", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/contact/admin/messages/{{contactMessageId}}" } }
+      ]
+    },
+    {
+      "name": "Chatbot",
+      "item": [
+        {
+          "name": "Create Session",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"userId\": \"{{userId}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/chatbot/sessions"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json?.session?.id) pm.collectionVariables.set('chatbotSessionId', json.session.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Send Message",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"message\": \"Bonjour\",\n  \"sender\": \"user\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/chatbot/sessions/{{chatbotSessionId}}/messages"
+          }
+        },
+        { "name": "Get Session Messages", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/chatbot/sessions/{{chatbotSessionId}}/messages?limit=50" } },
+        {
+          "name": "Admin Escalate Session",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"assignedTo\": \"{{adminUserId}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/chatbot/admin/sessions/{{chatbotSessionId}}/escalate"
+          }
+        },
+        { "name": "Admin List Sessions", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/chatbot/admin/sessions?page=1&limit=20" } }
+      ]
+    },
+    {
+      "name": "Analytics (Admin)",
+      "item": [
+        { "name": "Overview", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/analytics/admin/overview" } },
+        { "name": "Sales", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/analytics/admin/sales?groupBy=day" } },
+        { "name": "Products Analytics", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/analytics/admin/products?limit=10" } },
+        { "name": "Customers Analytics", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/analytics/admin/customers?segment=all" } },
+        { "name": "Export Analytics", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/analytics/admin/export?reportType=overview&format=csv" } }
+      ]
+    },
+    {
+      "name": "Legal",
+      "item": [
+        { "name": "Public Get Legal", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/legal/{{legalType}}" } },
+        { "name": "Admin List Legal Pages", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/legal/admin" } },
+        {
+          "name": "Admin Upsert Legal Page",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"content\": \"<h1>CGU</h1><p>Contenu de test</p>\",\n  \"lang\": \"fr\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/legal/admin/{{legalType}}"
+          }
+        },
+        { "name": "Admin Legal History", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/legal/admin/{{legalType}}/history" } }
+      ]
+    },
+    {
+      "name": "Homepage",
+      "item": [
+        { "name": "Get Carousel", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/homepage/carousel" } },
+        { "name": "Get Homepage Config", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/homepage/config" } },
+        { "name": "Get Featured Products", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/homepage/featured-products?limit=8" } },
+        { "name": "Get Banners", "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/homepage/banners?position=TOP" } },
+
+        {
+          "name": "Admin Create Carousel Slide",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageRef\": \"{{mediaRef}}\",\n  \"title\": \"Nouvelle collection\",\n  \"textContent\": \"Decouvrez nos nouveautes\",\n  \"redirectUrl\": \"/produits\",\n  \"displayOrder\": 0,\n  \"isMainImage\": false,\n  \"isActive\": true\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/homepage/admin/carousel"
+          }
+        },
+        {
+          "name": "Admin Update Carousel Slide",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Slide MAJ\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/homepage/admin/carousel/{{slideId}}"
+          }
+        },
+        { "name": "Admin Delete Carousel Slide", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/homepage/admin/carousel/{{slideId}}" } },
+
+        {
+          "name": "Admin Add Featured Product",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"productId\": \"{{productId}}\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/homepage/admin/featured-products"
+          }
+        },
+        { "name": "Admin Delete Featured Product", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/homepage/admin/featured-products/{{productId}}" } },
+
+        {
+          "name": "Admin Create Banner",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Promo\",\n  \"imageRef\": \"{{mediaRef}}\",\n  \"redirectUrl\": \"/promo\",\n  \"position\": \"TOP\",\n  \"isActive\": true\n}"
+            },
+            "url": "{{baseUrl}}{{apiPrefix}}/homepage/admin/banners"
+          }
+        },
+        {
+          "name": "Admin Update Banner",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Promo MAJ\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/homepage/admin/banners/{{bannerId}}"
+          }
+        },
+        { "name": "Admin Delete Banner", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/homepage/admin/banners/{{bannerId}}" } }
+      ]
+    },
+    {
+      "name": "Admin Users",
+      "item": [
+        { "name": "List Users", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/admin/users?page=1&limit=25" } },
+        { "name": "Get User Details", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "GET", "url": "{{baseUrl}}{{apiPrefix}}/admin/users/{{adminUserId}}" } },
+        {
+          "name": "Update User Status",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"active\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/admin/users/{{adminUserId}}/status"
+          }
+        },
+        {
+          "name": "Send Email to User",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"subject\": \"Information\",\n  \"content\": \"Bonjour, ceci est un email de test.\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/admin/users/{{adminUserId}}/send-email"
+          }
+        },
+        { "name": "Force Reset Password", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "POST", "url": "{{baseUrl}}{{apiPrefix}}/admin/users/{{adminUserId}}/reset-password" } },
+        {
+          "name": "Delete User (Soft Delete)",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "DELETE",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"reason\": \"Suppression test\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/admin/users/{{adminUserId}}"
+          }
+        }
+      ]
+    }
+  ]
+}

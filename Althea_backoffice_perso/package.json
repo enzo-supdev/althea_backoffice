@@ -1,0 +1,37 @@
+{
+  "name": "althea-backoffice",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:clean": "npm run clean; next dev",
+    "build": "next build",
+    "build:clean": "npm run clean; next build",
+    "start": "next start",
+    "lint": "next lint",
+    "clean": "node -e \"const fs=require('fs');for(const p of ['.next','.turbo']){try{fs.rmSync(p,{recursive:true,force:true});console.log('removed',p)}catch(e){console.log('skip',p)}}\""
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
+    "axios": "^1.14.0",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.344.0",
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-hook-form": "^7.72.1",
+    "recharts": "^2.12.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "autoprefixer": "^10.4.17",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^14.2.0",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.0"
+  }
+}

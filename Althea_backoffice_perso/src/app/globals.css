@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-inter: 'Inter', sans-serif;
+    --font-poppins: 'Poppins', sans-serif;
+  }
+
+  html {
+    background:
+      radial-gradient(circle at top left, rgba(0, 168, 181, 0.14), transparent 32%),
+      radial-gradient(circle at top right, rgba(0, 61, 92, 0.12), transparent 28%),
+      linear-gradient(180deg, #f7feff 0%, #effbfc 42%, #ffffff 100%);
+  }
+
+  body {
+    @apply bg-shell-canvas text-gray-900;
+    background:
+      radial-gradient(circle at top left, rgba(0, 168, 181, 0.14), transparent 32%),
+      radial-gradient(circle at top right, rgba(0, 61, 92, 0.12), transparent 28%),
+      linear-gradient(180deg, #f7feff 0%, #effbfc 42%, #ffffff 100%);
+    min-height: 100vh;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading;
+  }
+
+  ::selection {
+    background: rgba(0, 168, 181, 0.2);
+    color: #0f2f44;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary hover:bg-primary-hover text-white font-medium px-4 py-2 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md;
+  }
+  
+  .btn-secondary {
+    @apply bg-dark hover:bg-dark/90 text-white font-medium px-4 py-2 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent text-dark hover:bg-primary-light/70 hover:text-dark font-medium px-4 py-2 rounded-lg transition-colors duration-200;
+  }
+  
+  .card {
+    @apply bg-shell-surface rounded-2xl shadow-sm border border-primary/10 p-6;
+  }
+
+  .card-elevated {
+    @apply bg-shell-surface rounded-2xl shadow-[0_12px_40px_rgba(0,61,92,0.08)] border border-primary/10 p-6;
+  }
+
+  .app-panel {
+    @apply bg-shell-surface/90 backdrop-blur rounded-2xl border border-primary/10 shadow-sm;
+  }
+  
+  .badge-success {
+    @apply bg-status-success/10 text-status-success px-2 py-1 rounded-full text-xs font-medium border border-status-success/20;
+  }
+  
+  .badge-warning {
+    @apply bg-status-warning/10 text-status-warning px-2 py-1 rounded-full text-xs font-medium border border-status-warning/20;
+  }
+  
+  .badge-error {
+    @apply bg-status-error/10 text-status-error px-2 py-1 rounded-full text-xs font-medium border border-status-error/20;
+  }
+
+  .input-base {
+    @apply w-full rounded-lg border border-primary/15 bg-white px-4 py-2 text-sm text-gray-900 shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20;
+  }
+
+  .section-title {
+    @apply text-lg font-heading font-semibold text-dark;
+  }
+}
