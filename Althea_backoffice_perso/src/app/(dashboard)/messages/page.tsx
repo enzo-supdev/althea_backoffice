@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Mail, MailOpen, Reply } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
@@ -63,6 +63,38 @@ export default function MessagesPage() {
 
   const replyDraft = replyForm.watch('reply')
 
+  const updateMessageInState = (messageId: string, nextMessage: Message) => {
+    setMessages((currentMessages) =>
+      currentMessages.map((item) => (item.id === messageId ? nextMessage : item))
+    )
+  }
+
+  const loadMessages = useCallback(async () => {
+    setLoadError('')
+    setIsLoading(true)
+
+    try {
+      const response = await messagesApi.listContactMessages({
+        page: 1,
+        limit: 20,
+        sortBy: 'createdAt',
+        sortOrder: 'desc',
+      })
+
+      setMessages(response.data)
+      setSelectedMessageId((currentSelectedId) => currentSelectedId ?? response.data[0]?.id ?? null)
+    } catch (error) {
+      setLoadError('La messagerie est indisponible.')
+      pushToast({
+        type: 'error',
+        title: 'Chargement messages impossible',
+        message: error instanceof ApiError ? error.message : 'Les donnees API ont echoue.',
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [pushToast])
+
   useEffect(() => {
     if (typeof window === 'undefined') return
 
@@ -97,71 +129,18 @@ export default function MessagesPage() {
   }, [])
 
   useEffect(() => {
-    let isMounted = true
-
-    const loadMessages = async () => {
-      setLoadError('')
-      setIsLoading(true)
-
-      try {
-        const loadedMessages = await messagesApi.list()
-        if (!isMounted) return
-        setMessages(loadedMessages)
-      } catch (error) {
-        if (!isMounted) return
-        setLoadError('La messagerie est indisponible.')
-        pushToast({
-          type: 'error',
-          title: 'Chargement messages impossible',
-          message: error instanceof ApiError ? error.message : 'Les donnees locales ont ete ignorees.',
-        })
-      } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
-      }
-    }
-
     void loadMessages()
-
-    return () => {
-      isMounted = false
-    }
-  }, [pushToast])
-
-  const persistMessages = async (nextMessages: Message[]) => {
-    setMessages(nextMessages)
-
-    try {
-      await messagesApi.save(nextMessages)
-    } catch (error) {
-      pushToast({
-        type: 'error',
-        title: 'Sauvegarde impossible',
-        message: error instanceof ApiError ? error.message : 'La synchronisation locale a echoue.',
-      })
-    }
-  }
+  }, [loadMessages])
 
   const retryLoadMessages = () => {
-    setLoadError('')
-    setIsLoading(true)
-
-    void messagesApi.list()
-      .then((loadedMessages) => {
-        setMessages(loadedMessages)
+    void loadMessages().catch((error) => {
+      setLoadError('La messagerie est indisponible.')
+      pushToast({
+        type: 'error',
+        title: 'Rechargement impossible',
+        message: error instanceof ApiError ? error.message : 'La tentative de rechargement a echoue.',
       })
-      .catch((error) => {
-        setLoadError('La messagerie est indisponible.')
-        pushToast({
-          type: 'error',
-          title: 'Rechargement impossible',
-          message: error instanceof ApiError ? error.message : 'La tentative de rechargement a echoue.',
-        })
-      })
-      .finally(() => {
-        setIsLoading(false)
-      })
+    })
   }
 
   const selectedMessage = useMemo(
@@ -209,35 +188,46 @@ export default function MessagesPage() {
     }
   }
 
-  const handleSelectMessage = (message: Message) => {
+  const handleSelectMessage = async (message: Message) => {
     setSelectedMessageId(message.id)
     replyForm.reset({ reply: '' })
 
     if (message.status === 'unread') {
-      const nextMessages: Message[] = messages.map((item) =>
-        item.id === message.id
-          ? { ...item, status: 'read' }
-          : item
-      )
-
-      void persistMessages(nextMessages)
+      try {
+        const updatedMessage = await messagesApi.updateContactMessageStatus(message.id, {
+          status: 'read',
+        })
+        updateMessageInState(message.id, updatedMessage)
+      } catch (error) {
+        pushToast({
+          type: 'error',
+          title: 'Marquage impossible',
+          message: error instanceof ApiError ? error.message : 'Le changement de statut a echoue.',
+        })
+      }
     }
   }
 
   const markSelectedAsRead = async () => {
     if (!selectedMessageId) return
-    const nextMessages: Message[] = messages.map((item) =>
-      item.id === selectedMessageId
-        ? { ...item, status: 'read' }
-        : item
-    )
 
-    await persistMessages(nextMessages)
+    try {
+      const updatedMessage = await messagesApi.updateContactMessageStatus(selectedMessageId, {
+        status: 'read',
+      })
+      updateMessageInState(selectedMessageId, updatedMessage)
 
-    pushToast({
-      type: 'info',
-      title: 'Message marque comme lu',
-    })
+      pushToast({
+        type: 'info',
+        title: 'Message marque comme lu',
+      })
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Marquage impossible',
+        message: error instanceof ApiError ? error.message : 'Le changement de statut a echoue.',
+      })
+    }
   }
 
   const replyToSelected = replyForm.handleSubmit(async (values) => {
@@ -245,67 +235,70 @@ export default function MessagesPage() {
 
     const replyMessage = values.reply.trim()
 
-    const nextMessages: Message[] = messages.map((item) =>
-      item.id === selectedMessageId
-        ? {
-            ...item,
-            status: 'replied',
-            replies: [
-              ...item.replies,
-              {
-                id: `reply-${Date.now()}`,
-                author: 'Support Althea',
-                message: replyMessage,
-                createdAt: new Date(),
-              },
-            ],
-          }
-        : item
-    )
+    try {
+      const updatedMessage = await messagesApi.replyContactMessage(selectedMessageId, {
+        reply: replyMessage,
+      })
+      updateMessageInState(selectedMessageId, updatedMessage)
+      replyForm.reset({ reply: '' })
 
-    await persistMessages(nextMessages)
-    replyForm.reset({ reply: '' })
-
-    pushToast({
-      type: 'success',
-      title: 'Reponse envoyee',
-      message: 'Le message a ete passe en repondu.',
-    })
+      pushToast({
+        type: 'success',
+        title: 'Reponse envoyee',
+        message: 'Le message a ete passe en repondu.',
+      })
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Reponse impossible',
+        message: error instanceof ApiError ? error.message : 'La reponse a echoue.',
+      })
+    }
   })
 
   const closeSelected = async () => {
     if (!selectedMessageId) return
 
-    const nextMessages: Message[] = messages.map((item) =>
-      item.id === selectedMessageId
-        ? { ...item, status: 'closed' }
-        : item
-    )
+    try {
+      const updatedMessage = await messagesApi.updateContactMessageStatus(selectedMessageId, {
+        status: 'processed',
+      })
+      updateMessageInState(selectedMessageId, updatedMessage)
 
-    await persistMessages(nextMessages)
-
-    pushToast({
-      type: 'success',
-      title: 'Conversation close',
-      message: 'Le ticket support a ete archive localement.',
-    })
+      pushToast({
+        type: 'success',
+        title: 'Conversation close',
+        message: 'Le ticket support a ete archive sur le serveur.',
+      })
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Fermeture impossible',
+        message: error instanceof ApiError ? error.message : 'La fermeture a echoue.',
+      })
+    }
   }
 
   const reopenSelected = async () => {
     if (!selectedMessageId) return
 
-    const nextMessages: Message[] = messages.map((item) =>
-      item.id === selectedMessageId
-        ? { ...item, status: item.replies.length > 0 ? 'replied' : 'read' }
-        : item
-    )
+    try {
+      const updatedMessage = await messagesApi.updateContactMessageStatus(selectedMessageId, {
+        status: 'read',
+      })
+      updateMessageInState(selectedMessageId, updatedMessage)
 
-    await persistMessages(nextMessages)
-
-    pushToast({
-      type: 'info',
-      title: 'Conversation rouverte',
-    })
+      pushToast({
+        type: 'info',
+        title: 'Conversation rouverte',
+      })
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Reouverture impossible',
+        message: error instanceof ApiError ? error.message : 'La reouverture a echoue.',
+      })
+    }
   }
 
   const getTimeline = (message: Message) => {

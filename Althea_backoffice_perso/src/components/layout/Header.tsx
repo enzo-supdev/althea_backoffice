@@ -86,7 +86,7 @@ export default function Header({ onOpenSidebar }: HeaderProps) {
       productsApi.list(),
       usersApi.list(),
       ordersApi.list(),
-      invoicesApi.list(),
+      invoicesApi.listMyInvoices({ page: 1, limit: 20 }).then((response) => response.data),
       messagesApi.list(),
       categoriesApi.list(),
     ])

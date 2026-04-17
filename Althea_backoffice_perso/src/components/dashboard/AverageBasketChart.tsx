@@ -81,8 +81,6 @@ export default function AverageBasketChart() {
         if (!isMounted) {
           return
         }
-
-        console.error('❌ Erreur AverageBasketChart:', error)
         setSales([])
       } finally {
         if (isMounted) {

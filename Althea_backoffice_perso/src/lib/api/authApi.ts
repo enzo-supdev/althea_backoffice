@@ -2,11 +2,13 @@ import axiosInstance from './axiosInstance';
 import {
   AuthResponse,
   RefreshTokenResponse,
-  User,
   LoginRequest,
   RegisterRequest,
   ChangePasswordRequest,
   ApiResponse,
+  TwoFactorStatusResponse,
+  TwoFactorVerifyRequest,
+  TwoFactorVerifyResponse,
 } from './types';
 
 /**
@@ -119,6 +121,42 @@ export const authApi = {
       '/auth/change-password',
       input
     );
+    return data.data;
+  },
+
+  /**
+   * GET /auth/2fa/status
+   * Retourne l'etat 2FA pour l'utilisateur connecte
+   */
+  async getTwoFactorStatus(): Promise<TwoFactorStatusResponse> {
+    const { data } = await axiosInstance.get<ApiResponse<TwoFactorStatusResponse>>('/auth/2fa/status');
+    return data.data;
+  },
+
+  /**
+   * POST /auth/2fa/enable
+   * Active 2FA (TOTP/HOTP) et retourne les infos de provisionning
+   */
+  async enableTwoFactor(): Promise<TwoFactorStatusResponse> {
+    const { data } = await axiosInstance.post<ApiResponse<TwoFactorStatusResponse>>('/auth/2fa/enable');
+    return data.data;
+  },
+
+  /**
+   * POST /auth/2fa/disable
+   * Desactive 2FA pour l'utilisateur connecte
+   */
+  async disableTwoFactor(): Promise<{ message: string }> {
+    const { data } = await axiosInstance.post<ApiResponse<{ message: string }>>('/auth/2fa/disable');
+    return data.data;
+  },
+
+  /**
+   * POST /auth/2fa/verify
+   * Valide un challenge 2FA serveur
+   */
+  async verifyTwoFactor(input: TwoFactorVerifyRequest): Promise<TwoFactorVerifyResponse> {
+    const { data } = await axiosInstance.post<ApiResponse<TwoFactorVerifyResponse>>('/auth/2fa/verify', input);
     return data.data;
   },
 };

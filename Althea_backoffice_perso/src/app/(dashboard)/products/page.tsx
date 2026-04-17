@@ -286,28 +286,42 @@ export default function ProductsPage() {
       return matchesSearch && matchesCategory && matchesStatus && matchesStock && matchesDate
     })
 
-    // Tri
+    const getSortValue = (product: Product, key: string): string | number => {
+      switch (key) {
+        case 'name':
+          return product.name.toLowerCase()
+        case 'category':
+          return product.category.name.toLowerCase()
+        case 'priceHT':
+          return product.priceHT
+        case 'tva':
+          return product.tva
+        case 'price':
+          return product.price
+        case 'stock':
+          return product.stock
+        case 'status':
+          return product.status
+        case 'createdAt':
+          return new Date(product.createdAt).getTime()
+        default:
+          return ''
+      }
+    }
+
     filtered.sort((a, b) => {
-      let aValue = (a as any)[sortKey]
-      let bValue = (b as any)[sortKey]
+      const aValue = getSortValue(a, sortKey)
+      const bValue = getSortValue(b, sortKey)
 
-      if (sortKey === 'category') {
-        aValue = a.category.name
-        bValue = b.category.name
-      }
-
-      if (sortKey === 'createdAt') {
-        aValue = new Date(a.createdAt).getTime()
-        bValue = new Date(b.createdAt).getTime()
-      }
-
-      if (typeof aValue === 'string') {
+      if (typeof aValue === 'string' && typeof bValue === 'string') {
         return sortDirection === 'asc'
           ? aValue.localeCompare(bValue)
           : bValue.localeCompare(aValue)
       }
 
-      return sortDirection === 'asc' ? aValue - bValue : bValue - aValue
+      return sortDirection === 'asc'
+        ? Number(aValue) - Number(bValue)
+        : Number(bValue) - Number(aValue)
     })
 
     return filtered

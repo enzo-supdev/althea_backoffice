@@ -53,17 +53,31 @@ export const invoicesApi = {
    * Compatibilité legacy : liste des factures pour les anciens écrans
    */
   async list(): Promise<any[]> {
-    const { data } = await axiosInstance.get<any>('/invoices/admin', {
-      params: { page: 1, limit: 100 },
-    });
-    const items: any[] = Array.isArray(data.data)
-      ? data.data
-      : Array.isArray((data as any).invoices)
-        ? (data as any).invoices
-        : Array.isArray(data)
-          ? data
-          : [];
-    return items.map(mapInvoiceToLegacy);
+    try {
+      const { data } = await axiosInstance.get<any>('/invoices/admin', {
+        params: { page: 1, limit: 20 },
+      });
+      const items: any[] = Array.isArray(data.data)
+        ? data.data
+        : Array.isArray((data as any).invoices)
+          ? (data as any).invoices
+          : Array.isArray(data)
+            ? data
+            : [];
+      return items.map(mapInvoiceToLegacy);
+    } catch {
+      const { data } = await axiosInstance.get<any>('/users/me/invoices', {
+        params: { page: 1, limit: 20 },
+      });
+      const items: any[] = Array.isArray(data.data)
+        ? data.data
+        : Array.isArray((data as any).invoices)
+          ? (data as any).invoices
+          : Array.isArray(data)
+            ? data
+            : [];
+      return items.map(mapInvoiceToLegacy);
+    }
   },
 
   /**

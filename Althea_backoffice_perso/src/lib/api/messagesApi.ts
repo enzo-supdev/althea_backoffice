@@ -63,13 +63,20 @@ export const messagesApi = {
     sortBy?: 'createdAt';
     sortOrder?: 'asc' | 'desc';
   }): Promise<PaginatedResponse<any>> {
-    const { data } = await axiosInstance.get<PaginatedResponse<any>>(
+    const { data } = await axiosInstance.get<any>(
       '/contact/admin/messages',
       { params }
     );
+    const items: any[] = Array.isArray(data.data)
+      ? data.data
+      : Array.isArray((data as any).messages)
+        ? (data as any).messages
+        : Array.isArray(data)
+          ? data
+          : [];
     return {
       ...data,
-      data: data.data.map(mapMessageToLegacy),
+      data: items.map(mapMessageToLegacy),
     };
   },
 

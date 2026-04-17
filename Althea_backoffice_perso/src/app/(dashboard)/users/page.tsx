@@ -430,6 +430,16 @@ export default function UsersPage() {
           >
             <Key className="h-4 w-4" />
           </button>
+          {!user.archived && user.status !== 'inactive' && (
+            <button
+              type="button"
+              title="Desactiver compte"
+              onClick={() => handleSingleStatusUpdate(user.id, 'inactive')}
+              className="rounded p-1 text-gray-600 transition-colors hover:text-status-warning"
+            >
+              <span className="text-xs font-semibold">Desactiver</span>
+            </button>
+          )}
           {user.status !== 'active' && !user.archived && (
             <button
               type="button"

@@ -7,10 +7,30 @@ import {
   Product,
 } from './types';
 
+function normalizeCarouselList(payload: any): HomepageCarouselSlide[] {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (Array.isArray(payload?.slides)) {
+    return payload.slides;
+  }
+
+  if (Array.isArray(payload?.carousel)) {
+    return payload.carousel;
+  }
+
+  return [];
+}
+
+function normalizeCarouselSlide(payload: any): HomepageCarouselSlide {
+  return (payload?.slide ?? payload?.carouselSlide ?? payload) as HomepageCarouselSlide;
+}
+
 export const homepageApi = {
   async getCarousel(): Promise<HomepageCarouselSlide[]> {
     const { data } = await axiosInstance.get<ApiResponse<HomepageCarouselSlide[]>>('/homepage/carousel');
-    return data.data;
+    return normalizeCarouselList(data.data);
   },
 
   async getConfig(): Promise<HomepageConfig> {
@@ -34,12 +54,12 @@ export const homepageApi = {
 
   async createCarouselSlide(input: Partial<HomepageCarouselSlide>): Promise<HomepageCarouselSlide> {
     const { data } = await axiosInstance.post<ApiResponse<HomepageCarouselSlide>>('/homepage/admin/carousel', input);
-    return data.data;
+    return normalizeCarouselSlide(data.data);
   },
 
   async updateCarouselSlide(id: string, input: Partial<HomepageCarouselSlide>): Promise<HomepageCarouselSlide> {
     const { data } = await axiosInstance.put<ApiResponse<HomepageCarouselSlide>>(`/homepage/admin/carousel/${id}`, input);
-    return data.data;
+    return normalizeCarouselSlide(data.data);
   },
 
   async deleteCarouselSlide(id: string): Promise<{ message: string }> {

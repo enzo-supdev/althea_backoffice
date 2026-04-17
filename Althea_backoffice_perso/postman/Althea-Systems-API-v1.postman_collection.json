@@ -745,6 +745,16 @@
             "url": "{{baseUrl}}{{apiPrefix}}/contact/admin/messages/{{contactMessageId}}/status"
           }
         },
+        {
+          "name": "Admin Reply Message",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"reply\": \"Bonjour, merci pour votre message.\"\n}" },
+            "url": "{{baseUrl}}{{apiPrefix}}/contact/admin/messages/{{contactMessageId}}/reply"
+          }
+        },
         { "name": "Admin Delete Message", "request": { "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{adminAccessToken}}", "type": "string" }] }, "method": "DELETE", "url": "{{baseUrl}}{{apiPrefix}}/contact/admin/messages/{{contactMessageId}}" } }
       ]
     },

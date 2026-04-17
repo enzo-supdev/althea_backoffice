@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import Image from 'next/image'
 import { Bell, Building2, CheckCircle2, Clock3, GripVertical, Plus, RefreshCcw, Shield, Trash2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
@@ -10,17 +11,22 @@ import FormActions from '@/components/ui/form/FormActions'
 import FormField from '@/components/ui/form/FormField'
 import Modal from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/ToastProvider'
-import { ApiError, authApi } from '@/lib/api'
-import { TWO_FACTOR_PENDING_KEY, TWO_FACTOR_VERIFIED_AT_KEY, generateTwoFactorSecret, getCurrentTotpCode, loadTwoFactorSettings, saveTwoFactorSettings } from '@/lib/security'
+import { ApiError, authApi, homepageApi, mediaApi } from '@/lib/api'
+import { HomepageCarouselSlide } from '@/lib/api/types'
+import { axiosInstance } from '@/lib/api/axiosInstance'
+import { TWO_FACTOR_PENDING_KEY, TWO_FACTOR_VERIFIED_AT_KEY } from '@/lib/security'
 
 type HomepageSlide = {
   id: string
+  imageRef: string
   imageUrl: string
+  title: string
   redirectUrl: string
-  textHtml: string
+  textContent: string
+  displayOrder: number
+  isMainImage: boolean
+  isActive: boolean
 }
-
-const HOMEPAGE_SLIDES_KEY = 'althea.backoffice.homepage.slides'
 
 const settingsSchema = z.object({
   companyName: z.string().trim().min(1, 'Le nom de la societe est requis.'),
@@ -104,29 +110,50 @@ function loadStoredSettings(): SettingsForm {
   }
 }
 
-function loadHomepageSlides(): HomepageSlide[] {
-  if (typeof window === 'undefined') return []
+const MEDIA_BASE_URL = (axiosInstance.defaults.baseURL ?? '').replace(/\/api\/v1\/?$/, '')
 
-  const raw = window.localStorage.getItem(HOMEPAGE_SLIDES_KEY)
-  if (!raw) return []
-
-  try {
-    const parsed = JSON.parse(raw) as HomepageSlide[]
-    return Array.isArray(parsed) ? parsed.slice(0, 3) : []
-  } catch {
-    return []
+const resolveMediaUrl = (ref: string | null | undefined): string => {
+  if (!ref) {
+    return ''
   }
+
+  if (/^https?:\/\//i.test(ref)) {
+    return ref
+  }
+
+  if (!MEDIA_BASE_URL) {
+    return ref
+  }
+
+  return `${MEDIA_BASE_URL}/api/v1/media/${ref}`
 }
+
+const mapSlideFromApi = (slide: HomepageCarouselSlide): HomepageSlide => ({
+  id: slide.id,
+  imageRef: slide.imageRef ?? '',
+  imageUrl: resolveMediaUrl(slide.imageRef),
+  title: slide.title ?? '',
+  redirectUrl: slide.redirectUrl ?? '',
+  textContent: slide.textContent ?? '',
+  displayOrder: slide.displayOrder ?? 0,
+  isMainImage: Boolean(slide.isMainImage),
+  isActive: Boolean(slide.isActive),
+})
 
 export default function SettingsPage() {
   const { pushToast } = useToast()
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false)
-  const [twoFactorSecret, setTwoFactorSecret] = useState('')
+  const [twoFactorMethod, setTwoFactorMethod] = useState<'totp' | 'hotp' | null>(null)
+  const [twoFactorProvisioningUri, setTwoFactorProvisioningUri] = useState('')
+  const [twoFactorRecoveryCodesCount, setTwoFactorRecoveryCodesCount] = useState<number | null>(null)
+  const [isUpdating2fa, setIsUpdating2fa] = useState(false)
   const [slides, setSlides] = useState<HomepageSlide[]>([])
   const [draggingSlideId, setDraggingSlideId] = useState<string | null>(null)
   const [editingSlideId, setEditingSlideId] = useState<string | null>(null)
+  const [isLoadingCarousel, setIsLoadingCarousel] = useState(true)
+  const [isSavingSlide, setIsSavingSlide] = useState(false)
 
   const {
     register,
@@ -159,17 +186,50 @@ export default function SettingsPage() {
     const stored = loadStoredSettings()
     reset(stored)
 
-    const securitySettings = loadTwoFactorSettings()
-    setTwoFactorEnabled(securitySettings.enabled)
-    setTwoFactorSecret(securitySettings.secret)
+    void authApi.getTwoFactorStatus()
+      .then((status) => {
+        setTwoFactorEnabled(status.enabled)
+        setTwoFactorMethod(status.method ?? null)
+        setTwoFactorProvisioningUri(status.provisioningUri ?? '')
+        setTwoFactorRecoveryCodesCount(status.recoveryCodesCount ?? null)
+      })
+      .catch(() => {
+        setTwoFactorEnabled(false)
+        setTwoFactorMethod(null)
+        setTwoFactorProvisioningUri('')
+        setTwoFactorRecoveryCodesCount(null)
+      })
 
-    setSlides(loadHomepageSlides())
+    setIsLoadingCarousel(true)
+    void homepageApi.getCarousel()
+      .then((loadedSlides) => {
+        const mapped = loadedSlides
+          .map(mapSlideFromApi)
+          .sort((left, right) => left.displayOrder - right.displayOrder)
+          .slice(0, 3)
+
+        setSlides(mapped)
+        if (mapped.length > 0) {
+          setEditingSlideId(mapped[0].id)
+        }
+      })
+      .catch((error) => {
+        setSlides([])
+        pushToast({
+          type: 'error',
+          title: 'Chargement carrousel impossible',
+          message: error instanceof ApiError ? error.message : 'Impossible de charger les slides depuis l API.',
+        })
+      })
+      .finally(() => {
+        setIsLoadingCarousel(false)
+      })
 
     if (typeof window !== 'undefined') {
       const savedAt = window.localStorage.getItem(`${STORAGE_KEY}_saved_at`)
       setLastSavedAt(savedAt)
     }
-  }, [reset])
+  }, [pushToast, reset])
 
   const updatedLabel = useMemo(() => {
     if (!lastSavedAt) return 'Jamais sauvegarde'
@@ -231,29 +291,59 @@ export default function SettingsPage() {
     }
   })
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(HOMEPAGE_SLIDES_KEY, JSON.stringify(slides.slice(0, 3)))
-  }, [slides])
-
   const handleToggle2FA = () => {
-    const nextEnabled = !twoFactorEnabled
-    const nextSecret = nextEnabled ? twoFactorSecret || generateTwoFactorSecret() : ''
+    setIsUpdating2fa(true)
 
-    setTwoFactorEnabled(nextEnabled)
-    setTwoFactorSecret(nextSecret)
-    saveTwoFactorSettings({ enabled: nextEnabled, secret: nextSecret })
+    const action = twoFactorEnabled
+      ? authApi.disableTwoFactor()
+      : authApi.enableTwoFactor()
 
-    if (!nextEnabled) {
-      window.localStorage.removeItem(TWO_FACTOR_PENDING_KEY)
-      window.localStorage.removeItem(TWO_FACTOR_VERIFIED_AT_KEY)
-    }
+    void action
+      .then((result) => {
+        if (twoFactorEnabled) {
+          setTwoFactorEnabled(false)
+          setTwoFactorMethod(null)
+          setTwoFactorProvisioningUri('')
+          setTwoFactorRecoveryCodesCount(null)
+          window.localStorage.removeItem(TWO_FACTOR_PENDING_KEY)
+          window.localStorage.removeItem(TWO_FACTOR_VERIFIED_AT_KEY)
 
-    pushToast({
-      type: 'success',
-      title: nextEnabled ? '2FA activee' : '2FA desactivee',
-      message: nextEnabled ? 'Un code OTP sera requis a la connexion admin.' : 'Connexion admin sans seconde verification.',
-    })
+          pushToast({
+            type: 'success',
+            title: '2FA desactivee',
+            message: 'La verification forte est desactivee cote serveur.',
+          })
+          return
+        }
+
+        const status = result as {
+          enabled: boolean
+          method?: 'totp' | 'hotp'
+          provisioningUri?: string
+          recoveryCodesCount?: number
+        }
+
+        setTwoFactorEnabled(Boolean(status.enabled))
+        setTwoFactorMethod(status.method ?? 'totp')
+        setTwoFactorProvisioningUri(status.provisioningUri ?? '')
+        setTwoFactorRecoveryCodesCount(status.recoveryCodesCount ?? null)
+
+        pushToast({
+          type: 'success',
+          title: '2FA activee',
+          message: 'Provisionnez le facteur OTP dans votre application d authentification.',
+        })
+      })
+      .catch((error) => {
+        pushToast({
+          type: 'error',
+          title: 'Mise a jour 2FA impossible',
+          message: error instanceof ApiError ? error.message : 'La configuration 2FA serveur a echoue.',
+        })
+      })
+      .finally(() => {
+        setIsUpdating2fa(false)
+      })
   }
 
   const handleAddSlide = () => {
@@ -262,31 +352,106 @@ export default function SettingsPage() {
       return
     }
 
-    const newSlide: HomepageSlide = {
-      id: `slide-${Date.now()}`,
-      imageUrl: '',
-      redirectUrl: '',
-      textHtml: '<p>Nouveau slide</p>',
-    }
-
-    setSlides((prev) => [...prev, newSlide])
-    setEditingSlideId(newSlide.id)
+    setIsSavingSlide(true)
+    void homepageApi.createCarouselSlide({
+      imageRef: null,
+      title: `Slide ${slides.length + 1}`,
+      textContent: 'Nouveau slide',
+      redirectUrl: null,
+      displayOrder: slides.length,
+      isMainImage: false,
+      isActive: true,
+    })
+      .then((created) => {
+        const createdSlide = mapSlideFromApi(created)
+        setSlides((prev) => [...prev, createdSlide].sort((left, right) => left.displayOrder - right.displayOrder))
+        setEditingSlideId(createdSlide.id)
+        pushToast({ type: 'success', title: 'Slide ajoute', message: 'Le slide a ete cree.' })
+      })
+      .catch((error) => {
+        pushToast({
+          type: 'error',
+          title: 'Creation slide impossible',
+          message: error instanceof ApiError ? error.message : 'La creation du slide a echoue.',
+        })
+      })
+      .finally(() => {
+        setIsSavingSlide(false)
+      })
   }
 
   const handleDeleteSlide = (slideId: string) => {
-    setSlides((prev) => prev.filter((slide) => slide.id !== slideId))
-    if (editingSlideId === slideId) {
-      setEditingSlideId(null)
-    }
+    setIsSavingSlide(true)
+    void homepageApi.deleteCarouselSlide(slideId)
+      .then(() => {
+        setSlides((prev) => prev.filter((slide) => slide.id !== slideId))
+        if (editingSlideId === slideId) {
+          setEditingSlideId(null)
+        }
+        pushToast({ type: 'success', title: 'Slide supprime', message: 'Le slide a ete retire du carrousel.' })
+      })
+      .catch((error) => {
+        pushToast({
+          type: 'error',
+          title: 'Suppression slide impossible',
+          message: error instanceof ApiError ? error.message : 'La suppression du slide a echoue.',
+        })
+      })
+      .finally(() => {
+        setIsSavingSlide(false)
+      })
   }
 
   const handleSlideImageUpload = (slideId: string, file: File) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : ''
-      setSlides((prev) => prev.map((slide) => (slide.id === slideId ? { ...slide, imageUrl: result } : slide)))
-    }
-    reader.readAsDataURL(file)
+    setIsSavingSlide(true)
+    void mediaApi.upload(file)
+      .then((uploaded) => homepageApi.updateCarouselSlide(slideId, { imageRef: uploaded.ref }))
+      .then((updated) => {
+        const mapped = mapSlideFromApi(updated)
+        setSlides((prev) => prev.map((slide) => (slide.id === slideId ? mapped : slide)))
+        pushToast({ type: 'success', title: 'Image mise a jour', message: 'Image du slide envoyee avec succes.' })
+      })
+      .catch((error) => {
+        pushToast({
+          type: 'error',
+          title: 'Upload image impossible',
+          message: error instanceof ApiError ? error.message : 'Le televersement de l image a echoue.',
+        })
+      })
+      .finally(() => {
+        setIsSavingSlide(false)
+      })
+  }
+
+  const handlePersistSlide = (slideId: string) => {
+    const target = slides.find((slide) => slide.id === slideId)
+    if (!target) return
+
+    setIsSavingSlide(true)
+    void homepageApi.updateCarouselSlide(slideId, {
+      title: target.title || null,
+      textContent: target.textContent || null,
+      redirectUrl: target.redirectUrl || null,
+      imageRef: target.imageRef || null,
+      displayOrder: target.displayOrder,
+      isMainImage: target.isMainImage,
+      isActive: target.isActive,
+    })
+      .then((updated) => {
+        const mapped = mapSlideFromApi(updated)
+        setSlides((prev) => prev.map((slide) => (slide.id === slideId ? mapped : slide)))
+        pushToast({ type: 'success', title: 'Slide enregistre', message: 'Le slide a ete sauvegarde.' })
+      })
+      .catch((error) => {
+        pushToast({
+          type: 'error',
+          title: 'Sauvegarde slide impossible',
+          message: error instanceof ApiError ? error.message : 'La sauvegarde du slide a echoue.',
+        })
+      })
+      .finally(() => {
+        setIsSavingSlide(false)
+      })
   }
 
   const handleSlideDrop = (targetId: string) => {
@@ -297,8 +462,24 @@ export default function SettingsPage() {
     if (sourceIndex < 0 || targetIndex < 0) return
     const [moved] = next.splice(sourceIndex, 1)
     next.splice(targetIndex, 0, moved)
-    setSlides(next)
+    const reordered = next.map((slide, index) => ({ ...slide, displayOrder: index }))
+    setSlides(reordered)
     setDraggingSlideId(null)
+
+    setIsSavingSlide(true)
+    void Promise.all(
+      reordered.map((slide) => homepageApi.updateCarouselSlide(slide.id, { displayOrder: slide.displayOrder }))
+    )
+      .catch((error) => {
+        pushToast({
+          type: 'error',
+          title: 'Reorganisation impossible',
+          message: error instanceof ApiError ? error.message : 'L ordre des slides n a pas pu etre sauvegarde.',
+        })
+      })
+      .finally(() => {
+        setIsSavingSlide(false)
+      })
   }
 
   const activeSlide = slides.find((slide) => slide.id === editingSlideId) ?? null
@@ -465,23 +646,23 @@ export default function SettingsPage() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-heading font-semibold text-dark">Authentification forte (2FA)</h2>
-              <p className="mt-1 text-sm text-gray-500">Active une verification OTP a 6 chiffres pour tous les admins.</p>
+              <p className="mt-1 text-sm text-gray-500">Active une verification OTP serveur (TOTP/HOTP) pour les admins.</p>
             </div>
             <button
               type="button"
               onClick={handleToggle2FA}
+              disabled={isUpdating2fa}
               className={`rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors ${twoFactorEnabled ? 'bg-status-error hover:bg-status-error/90' : 'bg-status-success hover:bg-status-success/90'}`}
             >
-              {twoFactorEnabled ? 'Desactiver 2FA' : 'Activer 2FA'}
+              {isUpdating2fa ? 'Mise a jour...' : twoFactorEnabled ? 'Desactiver 2FA' : 'Activer 2FA'}
             </button>
           </div>
 
           <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm">
             <p>Etat: <strong>{twoFactorEnabled ? 'Active' : 'Inactive'}</strong></p>
-            <p className="mt-1">Secret OTP: <code>{twoFactorSecret || 'non configure'}</code></p>
-            {twoFactorEnabled && twoFactorSecret && (
-              <p className="mt-1">Code actuel (simulation): <strong>{getCurrentTotpCode(twoFactorSecret)}</strong></p>
-            )}
+            <p className="mt-1">Methode: <strong>{twoFactorMethod ? twoFactorMethod.toUpperCase() : 'Non configuree'}</strong></p>
+            <p className="mt-1">URI de provisionning: <code>{twoFactorProvisioningUri || 'non disponible'}</code></p>
+            <p className="mt-1">Codes de recuperation restants: <strong>{twoFactorRecoveryCodesCount ?? 'n/a'}</strong></p>
           </div>
         </section>
 
@@ -489,11 +670,12 @@ export default function SettingsPage() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-heading font-semibold text-dark">Carrousel accueil</h2>
-              <p className="mt-1 text-sm text-gray-500">3 slides max, image + lien + texte formate, reorganisation en glisser-deposer.</p>
+              <p className="mt-1 text-sm text-gray-500">3 slides max, image + lien + texte, lecture via /homepage/carousel et edition via /homepage/admin/carousel.</p>
             </div>
             <button
               type="button"
               onClick={handleAddSlide}
+              disabled={isSavingSlide || isLoadingCarousel}
               className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
             >
               <Plus className="h-4 w-4" /> Ajouter slide
@@ -502,7 +684,9 @@ export default function SettingsPage() {
 
           <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
             <div className="space-y-3">
-              {slides.length === 0 ? (
+              {isLoadingCarousel ? (
+                <p className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500">Chargement des slides...</p>
+              ) : slides.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-gray-300 p-4 text-sm text-gray-500">Aucun slide configure.</p>
               ) : (
                 slides.map((slide, index) => (
@@ -517,7 +701,7 @@ export default function SettingsPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <button type="button" onClick={() => setEditingSlideId(slide.id)} className="text-left">
-                        <p className="text-sm font-medium text-dark">Slide {index + 1}</p>
+                        <p className="text-sm font-medium text-dark">{slide.title || `Slide ${index + 1}`}</p>
                         <p className="text-xs text-gray-500">{slide.redirectUrl || 'Aucun lien'}</p>
                       </button>
                       <div className="flex items-center gap-2">
@@ -541,6 +725,16 @@ export default function SettingsPage() {
                 <p className="text-sm text-gray-500">Selectionnez un slide pour le modifier.</p>
               ) : (
                 <div className="space-y-3">
+                  <FormField label="Titre" htmlFor="slide-title">
+                    <input
+                      id="slide-title"
+                      type="text"
+                      value={activeSlide.title}
+                      onChange={(event) => setSlides((prev) => prev.map((slide) => (slide.id === activeSlide.id ? { ...slide, title: event.target.value } : slide)))}
+                      className="input-base"
+                    />
+                  </FormField>
+
                   <FormField label="Lien de redirection" htmlFor="slide-link">
                     <input
                       id="slide-link"
@@ -554,12 +748,18 @@ export default function SettingsPage() {
                   <FormField label="Image du slide" htmlFor="slide-image-url">
                     <input
                       id="slide-image-url"
-                      type="url"
-                      value={activeSlide.imageUrl}
-                      onChange={(event) => setSlides((prev) => prev.map((slide) => (slide.id === activeSlide.id ? { ...slide, imageUrl: event.target.value } : slide)))}
+                      type="text"
+                      value={activeSlide.imageRef}
+                      onChange={(event) => setSlides((prev) => prev.map((slide) => (slide.id === activeSlide.id ? { ...slide, imageRef: event.target.value, imageUrl: resolveMediaUrl(event.target.value) } : slide)))}
                       className="input-base"
                     />
                   </FormField>
+
+                  {activeSlide.imageUrl && (
+                    <div className="relative h-28 w-full overflow-hidden rounded-lg">
+                      <Image src={activeSlide.imageUrl} alt={activeSlide.title || 'Slide'} fill className="object-cover" unoptimized />
+                    </div>
+                  )}
 
                   <input
                     type="file"
@@ -584,12 +784,23 @@ export default function SettingsPage() {
                     className="min-h-[120px] rounded-lg border border-gray-300 p-3 text-sm"
                     contentEditable
                     suppressContentEditableWarning
-                    dangerouslySetInnerHTML={{ __html: activeSlide.textHtml }}
+                    dangerouslySetInnerHTML={{ __html: activeSlide.textContent }}
                     onInput={(event) => {
                       const html = (event.target as HTMLDivElement).innerHTML
-                      setSlides((prev) => prev.map((slide) => (slide.id === activeSlide.id ? { ...slide, textHtml: html } : slide)))
+                      setSlides((prev) => prev.map((slide) => (slide.id === activeSlide.id ? { ...slide, textContent: html } : slide)))
                     }}
                   />
+
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => handlePersistSlide(activeSlide.id)}
+                      disabled={isSavingSlide}
+                      className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSavingSlide ? 'Enregistrement...' : 'Enregistrer le slide'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

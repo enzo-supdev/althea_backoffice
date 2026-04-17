@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthContext } from '@/contexts/AuthContext';
 import type { LoginRequest } from '@/lib/api/types';
-import { TWO_FACTOR_PENDING_KEY, TWO_FACTOR_VERIFIED_AT_KEY, getCurrentTotpCode, loadTwoFactorSettings } from '@/lib/security';
+import { authApi } from '@/lib/api';
+import { TWO_FACTOR_PENDING_KEY, TWO_FACTOR_VERIFIED_AT_KEY } from '@/lib/security';
 
 export const LoginForm = () => {
   const router = useRouter();
@@ -16,7 +17,7 @@ export const LoginForm = () => {
   const [error, setError] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [requires2fa, setRequires2fa] = useState(false);
-  const [pending2faSecret, setPending2faSecret] = useState('');
+  const [pending2faChallengeId, setPending2faChallengeId] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,11 +35,10 @@ export const LoginForm = () => {
         return;
       }
 
-      const twoFactorSettings = loadTwoFactorSettings();
-      if (twoFactorSettings.enabled && twoFactorSettings.secret) {
+      if (response?.twoFactorRequired) {
         localStorage.setItem(TWO_FACTOR_PENDING_KEY, 'true');
         localStorage.removeItem(TWO_FACTOR_VERIFIED_AT_KEY);
-        setPending2faSecret(twoFactorSettings.secret);
+        setPending2faChallengeId(response.twoFactorChallengeId ?? '');
         setRequires2fa(true);
         return;
       }
@@ -57,24 +57,48 @@ export const LoginForm = () => {
 
   const displayError = error || authError;
 
-  const handleValidate2fa = () => {
-    const expectedCode = getCurrentTotpCode(pending2faSecret);
-    if (otpCode.trim() !== expectedCode) {
-      setError('Code 2FA invalide. Reessayez.');
-      return;
-    }
+  const handleValidate2fa = async () => {
+    setLoading(true);
+    setError('');
 
-    localStorage.removeItem(TWO_FACTOR_PENDING_KEY);
-    localStorage.setItem(TWO_FACTOR_VERIFIED_AT_KEY, new Date().toISOString());
-    setRequires2fa(false);
-    setOtpCode('');
-    router.push('/dashboard');
+    try {
+      const result = await authApi.verifyTwoFactor({
+        code: otpCode.trim(),
+        challengeId: pending2faChallengeId || undefined,
+      });
+
+      if (!result.verified) {
+        setError('Code 2FA invalide. Reessayez.');
+        return;
+      }
+
+      if (result.accessToken) {
+        localStorage.setItem('accessToken', result.accessToken);
+      }
+
+      if (result.refreshToken) {
+        localStorage.setItem('refreshToken', result.refreshToken);
+      }
+
+      localStorage.removeItem(TWO_FACTOR_PENDING_KEY);
+      localStorage.setItem(TWO_FACTOR_VERIFIED_AT_KEY, new Date().toISOString());
+      setRequires2fa(false);
+      setPending2faChallengeId('');
+      setOtpCode('');
+      router.push('/dashboard');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Verification 2FA impossible';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancel2fa = () => {
     localStorage.removeItem(TWO_FACTOR_PENDING_KEY);
     logout();
     setRequires2fa(false);
+    setPending2faChallengeId('');
     setOtpCode('');
   };
 
@@ -141,9 +165,10 @@ export const LoginForm = () => {
             <button
               type="button"
               onClick={handleValidate2fa}
+              disabled={loading || otpCode.trim().length !== 6}
               className="flex-1 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
             >
-              Valider le code
+              {loading ? 'Verification...' : 'Valider le code'}
             </button>
             <button
               type="button"

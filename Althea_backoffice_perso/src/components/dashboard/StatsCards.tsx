@@ -5,6 +5,7 @@ import { TrendingUp, ShoppingCart, AlertTriangle, MessageSquare } from 'lucide-r
 import { analyticsApi, messagesApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { AnalyticsOverview } from '@/lib/api/types'
+import Badge from '@/components/ui/Badge'
 
 type StatItem = {
   name: string
@@ -13,6 +14,7 @@ type StatItem = {
   changeType: 'positive' | 'negative' | 'neutral'
   icon: typeof TrendingUp
   highlight?: 'danger'
+  dangerBadge?: string
 }
 
 const neutralStats: StatItem[] = [
@@ -67,34 +69,38 @@ export default function StatsCards() {
     const loadStats = async () => {
       setIsLoading(true)
 
-      try {
-        const [overviewResponse, messages, salesResponse] = await Promise.all([
-          analyticsApi.getOverview(),
-          messagesApi.list(),
-          analyticsApi.getSales({ groupBy: 'day' }),
-        ])
+      const [overviewResult, messagesResult, salesResult] = await Promise.allSettled([
+        analyticsApi.getOverview(),
+        messagesApi.list(),
+        analyticsApi.getSales({ groupBy: 'day' }),
+      ])
 
-        if (!isMounted) {
-          return
-        }
-
-        setOverview(overviewResponse.overview)
-        setUnreadMessages(messages.filter((message) => message.status === 'unread').length)
-        setSalesTimeline(Array.isArray(salesResponse?.sales?.timeline) ? salesResponse.sales.timeline : [])
-      } catch (error) {
-        if (!isMounted) {
-          return
-        }
-
-        console.error('❌ Erreur au chargement des stats:', error)
-        setOverview(null)
-        setUnreadMessages(null)
-        setSalesTimeline([])
-      } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
+      if (!isMounted) {
+        return
       }
+
+      if (overviewResult.status === 'fulfilled') {
+        setOverview(overviewResult.value.overview)
+      } else {
+        console.error('❌ Erreur overview:', overviewResult.reason)
+        setOverview(null)
+      }
+
+      if (messagesResult.status === 'fulfilled') {
+        setUnreadMessages(messagesResult.value.filter((message: { status: string }) => message.status === 'unread').length)
+      } else {
+        console.error('❌ Erreur messages:', messagesResult.reason)
+        setUnreadMessages(null)
+      }
+
+      if (salesResult.status === 'fulfilled') {
+        setSalesTimeline(Array.isArray(salesResult.value?.sales?.timeline) ? salesResult.value.sales.timeline : [])
+      } else {
+        console.error('❌ Erreur sales:', salesResult.reason)
+        setSalesTimeline([])
+      }
+
+      setIsLoading(false)
     }
 
     void loadStats()
@@ -153,6 +159,7 @@ export default function StatsCards() {
         changeType: outOfStock > 0 ? 'negative' : 'neutral',
         icon: AlertTriangle,
         highlight: outOfStock > 0 ? 'danger' : undefined,
+        dangerBadge: stockAlerts > 0 ? `${stockAlerts}` : undefined,
       },
       {
         name: 'Messages non traités',
@@ -161,6 +168,7 @@ export default function StatsCards() {
         changeType: 'neutral',
         icon: MessageSquare,
         highlight: (unreadMessages ?? 0) > 0 ? 'danger' : undefined,
+        dangerBadge: (unreadMessages ?? 0) > 0 ? String(unreadMessages) : undefined,
       },
     ]
   }, [overview, salesTimeline, unreadMessages])
@@ -174,7 +182,12 @@ export default function StatsCards() {
         >
           <div className="flex items-center justify-between gap-4">
             <div className="flex-1">
-              <p className="text-sm font-medium text-gray-600">{stat.name}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-medium text-gray-600">{stat.name}</p>
+                {stat.dangerBadge && (
+                  <Badge variant="error">{stat.dangerBadge}</Badge>
+                )}
+              </div>
               <p className="mt-2 text-3xl font-heading font-semibold text-dark">
                 {isLoading ? '...' : stat.value}
               </p>

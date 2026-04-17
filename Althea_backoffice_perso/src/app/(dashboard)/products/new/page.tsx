@@ -12,6 +12,7 @@ import FormActions from '@/components/ui/form/FormActions'
 import ProductImageManager from '@/components/ui/ProductImageManager'
 import { useToast } from '@/components/ui/ToastProvider'
 import { ApiError, categoriesApi, productsApi } from '@/lib/api'
+import { formatCurrency } from '@/lib/utils'
 import type { Category } from '@/types'
 import type { CreateProductRequest } from '@/lib/api/types'
 
@@ -65,6 +66,17 @@ export default function NewProductPage() {
 
   const watchedName = form.watch('name')
   const watchedSlug = form.watch('slug')
+  const watchedPriceHt = form.watch('priceHt')
+  const watchedVatRate = form.watch('vatRate')
+  const livePriceTtc = useMemo(() => {
+    const priceHt = Number(watchedPriceHt)
+    const vatRate = Number(watchedVatRate)
+    if (Number.isNaN(priceHt) || Number.isNaN(vatRate)) {
+      return 0
+    }
+
+    return Number((priceHt * (1 + vatRate / 100)).toFixed(2))
+  }, [watchedPriceHt, watchedVatRate])
 
   useEffect(() => {
     const generatedSlug = normalizeSlug(watchedName)
@@ -276,6 +288,11 @@ export default function NewProductPage() {
               <option value="published">Publié</option>
             </select>
           </FormField>
+        </div>
+
+        <div className="rounded-lg border border-primary/20 bg-primary-light/30 px-4 py-3 text-sm text-dark">
+          <span className="font-medium">Prix TTC calcule en direct:</span>{' '}
+          <span className="font-semibold">{formatCurrency(livePriceTtc)}</span>
         </div>
 
         <FormField label="Catégorie" htmlFor="categoryId" error={form.formState.errors.categoryId?.message}>

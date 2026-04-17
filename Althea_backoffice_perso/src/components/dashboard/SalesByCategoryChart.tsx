@@ -84,8 +84,6 @@ export default function SalesByCategoryChart() {
         if (!isMounted) {
           return
         }
-
-        console.error('❌ Erreur SalesByCategoryChart:', error)
         setRawData([])
       } finally {
         if (isMounted) {

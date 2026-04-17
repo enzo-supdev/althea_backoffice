@@ -24,8 +24,30 @@ export const analyticsApi = {
     sortBy?: 'revenue' | 'quantity' | 'views' | 'conversionRate';
     categoryId?: string;
   }): Promise<unknown> {
-    const { data } = await axiosInstance.get<ApiResponse<unknown>>('/analytics/admin/products', { params });
-    return data.data;
+    const requestParams = {
+      startDate: params?.startDate,
+      endDate: params?.endDate,
+      limit: params?.limit,
+      categoryId: params?.categoryId,
+    };
+
+    try {
+      const { data } = await axiosInstance.get<ApiResponse<unknown>>('/analytics/admin/products', {
+        params: requestParams,
+      });
+      return data.data;
+    } catch {
+      try {
+        const { data } = await axiosInstance.get<ApiResponse<unknown>>('/analytics/admin/products');
+        return data.data;
+      } catch {
+        return {
+          productAnalytics: {
+            topSellers: [],
+          },
+        };
+      }
+    }
   },
 
   async getCustomers(params?: {

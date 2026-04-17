@@ -30,7 +30,6 @@ export default function OrdersPage() {
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([])
-  const [viewOrder, setViewOrder] = useState<Order | null>(null)
   const { pushToast } = useToast()
 
   useEffect(() => {
@@ -265,85 +264,6 @@ export default function OrdersPage() {
     })
   }
 
-  const updateSingleOrderStatus = async (orderId: string, nextStatus: Order['status']) => {
-    const nextOrders: Order[] = orders.map((order) =>
-      order.id === orderId
-        ? { ...order, status: nextStatus }
-        : order
-    )
-
-    await persistOrders(nextOrders)
-
-    setViewOrder((current) =>
-      current && current.id === orderId
-        ? { ...current, status: nextStatus }
-        : current
-    )
-
-    pushToast({
-      type: 'success',
-      title: 'Statut commande mis a jour',
-      message: `La commande est maintenant ${getStatusBadge(nextStatus).label.toLowerCase()}.`,
-    })
-  }
-
-  const updateSingleOrderPayment = async (orderId: string, nextStatus: Order['paymentStatus']) => {
-    const nextOrders: Order[] = orders.map((order) =>
-      order.id === orderId
-        ? { ...order, paymentStatus: nextStatus }
-        : order
-    )
-
-    await persistOrders(nextOrders)
-
-    setViewOrder((current) =>
-      current && current.id === orderId
-        ? { ...current, paymentStatus: nextStatus }
-        : current
-    )
-
-    pushToast({
-      type: 'success',
-      title: 'Paiement mis a jour',
-      message: `Le paiement est maintenant ${getPaymentStatusBadge(nextStatus).label.toLowerCase()}.`,
-    })
-  }
-
-  const getOrderTimeline = (order: Order) => {
-    const timeline = [
-      {
-        label: 'Commande creee',
-        date: order.createdAt,
-        active: true,
-      },
-      {
-        label: 'Paiement valide',
-        date: order.createdAt,
-        active: order.paymentStatus === 'validated' || order.paymentStatus === 'refunded',
-      },
-      {
-        label: 'Preparation',
-        date: order.createdAt,
-        active: order.status === 'processing' || order.status === 'completed',
-      },
-      {
-        label: 'Livraison finalisee',
-        date: order.createdAt,
-        active: order.status === 'completed',
-      },
-    ]
-
-    if (order.status === 'cancelled') {
-      timeline.push({
-        label: 'Commande annulee',
-        date: order.createdAt,
-        active: true,
-      })
-    }
-
-    return timeline
-  }
-
   const openDeleteConfirm = (ids: string[]) => {
     if (ids.length === 0) return
     setDeleteTargetIds(ids)
@@ -457,14 +377,13 @@ export default function OrdersPage() {
       key: 'actions',
       label: 'Actions',
       render: (order) => (
-        <button
-          type="button"
-          onClick={() => setViewOrder(order)}
+        <Link
+          href={`/orders/${order.id}`}
           className="rounded p-1 text-gray-600 transition-colors hover:text-primary"
           aria-label="Voir le detail de la commande"
         >
           <Eye className="h-4 w-4" />
-        </button>
+        </Link>
       ),
     },
   ]
@@ -638,157 +557,6 @@ export default function OrdersPage() {
         </div>
       </Modal>
 
-      <Modal
-        isOpen={!!viewOrder}
-        onClose={() => setViewOrder(null)}
-        title="Detail de la commande"
-        size="lg"
-      >
-        {viewOrder && (
-          <div className="space-y-6 text-sm text-gray-700">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 md:col-span-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Commande</p>
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <h3 className="text-lg font-semibold text-dark">{viewOrder.orderNumber}</h3>
-                  <Badge variant={getStatusBadge(viewOrder.status).variant}>
-                    {getStatusBadge(viewOrder.status).label}
-                  </Badge>
-                  <Badge variant={getPaymentStatusBadge(viewOrder.paymentStatus).variant}>
-                    {getPaymentStatusBadge(viewOrder.paymentStatus).label}
-                  </Badge>
-                </div>
-                <p className="mt-2 text-gray-600">
-                  {viewOrder.customer.fullName} - {viewOrder.customer.email}
-                </p>
-                <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-                  <div>
-                    <p className="text-xs text-gray-500">Montant TTC</p>
-                    <p className="font-medium text-dark">{formatCurrency(viewOrder.totalAmount)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Paiement</p>
-                    <p className="font-medium text-dark">{viewOrder.paymentMethod}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Date</p>
-                    <p className="font-medium text-dark">{formatDateTime(viewOrder.createdAt)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Articles</p>
-                    <p className="font-medium text-dark">{viewOrder.items.length}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Actions rapides</p>
-                <div className="mt-3 space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => updateSingleOrderStatus(viewOrder.id, 'processing')}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-left text-sm transition-colors hover:bg-gray-50"
-                  >
-                    Passer en cours
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateSingleOrderStatus(viewOrder.id, 'completed')}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-left text-sm transition-colors hover:bg-gray-50"
-                  >
-                    Marquer terminee
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateSingleOrderPayment(viewOrder.id, 'validated')}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-left text-sm transition-colors hover:bg-gray-50"
-                  >
-                    Valider paiement
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => updateSingleOrderPayment(viewOrder.id, 'refunded')}
-                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-left text-sm transition-colors hover:bg-gray-50"
-                  >
-                    Rembourser
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <h4 className="font-semibold text-dark">Articles commandés</h4>
-                <div className="mt-4 space-y-3">
-                  {viewOrder.items.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-start justify-between gap-4 rounded-lg bg-gray-50 p-3"
-                    >
-                      <div>
-                        <p className="font-medium text-dark">{item.product.name}</p>
-                        <p className="text-xs text-gray-500">Qté {item.quantity} × {formatCurrency(item.price)}</p>
-                      </div>
-                      <p className="font-medium text-dark">{formatCurrency(item.price * item.quantity)}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-gray-200 bg-white p-4">
-                <h4 className="font-semibold text-dark">Adresses</h4>
-                <div className="mt-4 space-y-4">
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Livraison</p>
-                    <p className="mt-1 text-gray-700">
-                      {viewOrder.shippingAddress.firstName} {viewOrder.shippingAddress.lastName}
-                      <br />
-                      {viewOrder.shippingAddress.address1}
-                      {viewOrder.shippingAddress.address2 ? <><br />{viewOrder.shippingAddress.address2}</> : null}
-                      <br />
-                      {viewOrder.shippingAddress.postalCode} {viewOrder.shippingAddress.city}
-                      <br />
-                      {viewOrder.shippingAddress.region}, {viewOrder.shippingAddress.country}
-                      <br />
-                      {viewOrder.shippingAddress.phone}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-gray-500">Facturation</p>
-                    <p className="mt-1 text-gray-700">
-                      {viewOrder.billingAddress.firstName} {viewOrder.billingAddress.lastName}
-                      <br />
-                      {viewOrder.billingAddress.address1}
-                      {viewOrder.billingAddress.address2 ? <><br />{viewOrder.billingAddress.address2}</> : null}
-                      <br />
-                      {viewOrder.billingAddress.postalCode} {viewOrder.billingAddress.city}
-                      <br />
-                      {viewOrder.billingAddress.region}, {viewOrder.billingAddress.country}
-                      <br />
-                      {viewOrder.billingAddress.phone}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gray-200 bg-white p-4">
-              <h4 className="font-semibold text-dark">Timeline statut</h4>
-              <div className="mt-4 space-y-3">
-                {getOrderTimeline(viewOrder).map((step, index) => (
-                  <div key={step.label} className="flex items-start gap-3">
-                    <div className={`mt-1 h-3 w-3 rounded-full ${step.active ? 'bg-primary' : 'bg-gray-300'}`} />
-                    <div>
-                      <p className={`font-medium ${step.active ? 'text-dark' : 'text-gray-500'}`}>{step.label}</p>
-                      <p className="text-xs text-gray-500">{formatDateTime(step.date)}{index === 0 ? ' - point de depart' : ''}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </Modal>
     </div>
   )
 }

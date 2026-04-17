@@ -74,6 +74,8 @@ export interface AuthResponse {
   user: User;
   accessToken: string;
   refreshToken: string;
+  twoFactorRequired?: boolean;
+  twoFactorChallengeId?: string;
 }
 
 export interface RefreshTokenResponse {
@@ -96,6 +98,24 @@ export interface RegisterRequest {
 export interface ChangePasswordRequest {
   currentPassword: string;
   newPassword: string;
+}
+
+export interface TwoFactorStatusResponse {
+  enabled: boolean;
+  method?: 'totp' | 'hotp';
+  recoveryCodesCount?: number;
+  provisioningUri?: string;
+}
+
+export interface TwoFactorVerifyRequest {
+  code: string;
+  challengeId?: string;
+}
+
+export interface TwoFactorVerifyResponse {
+  verified: boolean;
+  accessToken?: string;
+  refreshToken?: string;
 }
 
 // ============================================================================
