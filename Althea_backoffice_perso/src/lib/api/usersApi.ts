@@ -49,6 +49,29 @@ export const usersApi = {
   },
 
   /**
+   * GET /admin/users
+   * Liste admin paginée avec filtres complets.
+   */
+  async listAdmin(params?: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    role?: 'USER' | 'ADMIN';
+    emailVerified?: boolean;
+    status?: 'ACTIVE' | 'SUSPENDED' | 'DELETED';
+    startDate?: string;
+    endDate?: string;
+    sortBy?: string;
+    order?: 'asc' | 'desc';
+  }): Promise<PaginatedResponse<any>> {
+    const { data } = await axiosInstance.get<PaginatedResponse<User>>('/admin/users', { params });
+    return {
+      ...data,
+      data: data.data.map(mapUserToLegacy),
+    };
+  },
+
+  /**
    * GET /users/me
    * Récupère le profil de l'utilisateur connecté.
    */
@@ -71,12 +94,12 @@ export const usersApi = {
 
   /**
    * PUT /users/me/email
-   * Change l'email avec validation du mot de passe.
+   * Change l'email. Un email de vérification est envoyé à la nouvelle adresse.
    */
-  async updateEmail(email: string, password: string): Promise<{ message: string }> {
+  async updateEmail(email: string): Promise<{ message: string }> {
     const { data } = await axiosInstance.put<ApiResponse<{ message: string }>>(
       '/users/me/email',
-      { email, password },
+      { email },
     );
     return data.data;
   },
@@ -236,10 +259,15 @@ export const usersApi = {
 
   /**
    * DELETE /admin/users/:id
+   * Body requis : deleteType ('SOFT' | 'HARD'), reason. anonymize optionnel pour HARD.
    */
-  async delete(id: string): Promise<{ message: string }> {
+  async delete(
+    id: string,
+    input: { deleteType: 'SOFT' | 'HARD'; reason: string; anonymize?: boolean },
+  ): Promise<{ message: string }> {
     const { data } = await axiosInstance.delete<ApiResponse<{ message: string }>>(
       `/admin/users/${id}`,
+      { data: input },
     );
     return data.data;
   },

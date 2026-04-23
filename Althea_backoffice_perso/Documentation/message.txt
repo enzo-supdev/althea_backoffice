@@ -1,0 +1,203 @@
+ Documentation — Endpoints Analytics Admin                                                                              
+                                                
+  Base URL : http://localhost:3000/api/v1/analytics                                                                      
+  Auth requise pour tous : Authorization: Bearer <admin_jwt> (role admin)                                                
+  Erreurs communes : 401 UNAUTHORIZED (pas de token), 401 INVALID_TOKEN, 403 FORBIDDEN (pas admin), 400 VALIDATION_ERROR,
+   500 INTERNAL_SERVER_ERROR                                                                                             
+  Query params communs (tous optionnels) :                                                                               
+  - startDate — ISO datetime (ex: 2026-01-01T00:00:00.000Z)                                                              
+  - endDate — ISO datetime                                                                                               
+  - Défaut : 30 derniers jours si absents. startDate doit être ≤ endDate.                                                
+                                                                                                                         
+  Format réponse standard : { "success": true, "data": { ... } }                                                         
+                                                                                                                         
+  ---                                                                                                                    
+  1. GET /admin/overview — KPI globaux                                                                                   
+                                                                                                                         
+  Query : startDate, endDate
+                                                                                                                         
+  Réponse data.overview :                                                                                                
+  {
+    "totalRevenue": 149.00,                                                                                              
+    "totalOrders": 1,                                          
+    "totalUsers": 5, 
+    "totalProducts": 4,                                                                                                  
+    "averageOrderValue": 149.00,
+    "revenueGrowth": 15.5,                                                                                               
+    "newUsers": 2,                                             
+    "conversionRate": 20.0,                                                                                              
+    "period": { "startDate": "...", "endDate": "..." }
+  }                                                                                                                      
+                                                               
+  ---                                                                                                                    
+  2. GET /admin/sales — Ventes par période                     
+                                                                                                                         
+  Query : startDate, endDate, groupBy ∈ day|week|month (défaut day)
+                                                                                                                         
+  Réponse data.sales : tableau de                              
+  [{ "period": "2026-04-21", "startDate": "2026-04-21", "endDate": "2026-04-21",                                         
+     "revenue": 149.00, "orderCount": 1, "averageOrderValue": 149.00 }]
+                                                                                                                         
+  ---
+  3. GET /admin/products — Analyse produits                                                                              
+                                                                                                                         
+  Query : startDate, endDate, limit (1-100, défaut 10)
+                                                                                                                         
+  Réponse data :                                                                                                         
+  {
+    "topSellingProducts": [{ "productId", "productName", "quantitySold", "totalRevenue", "averagePrice" }],              
+    "topRevenueProducts": [...],                                                                           
+    "lowStockProducts": [{ "productId", "productName", "stock", "status" }],                                             
+    "outOfStockProducts": [...]                                                                                          
+  }                                                                                                                      
+                                                                                                                         
+  ---                                                                                                                    
+  4. GET /admin/customers — Analyse clients                    
+                                                                                                                         
+  Query : startDate, endDate, limit (1-100, défaut 10)
+                                                                                                                         
+  Réponse data :                                               
+  {
+    "topCustomers": [{ "userId", "email", "firstName", "lastName",
+                      "totalSpent", "orderCount", "averageOrderValue", "lifetimeValue" }],
+    "newCustomers": 2,                                                                                                   
+    "averageOrdersPerCustomer": 0.2                                                                                      
+  }                                                                                                                      
+                                                                                                                         
+  ---                                                          
+  5. GET /admin/orders-stats — Statuts & délais commandes                                                                
+                                                                                                                         
+  Query : startDate, endDate
+                                                                                                                         
+  Réponse data :                                               
+  {
+    "byOrderStatus": [{ "status": "completed", "count": 1, "percentage": 100 }],                                         
+    "byPaymentStatus": [{ "status": "paid", "count": 1, "percentage": 100 }],   
+    "cancellationRate": 0,                                                                                               
+    "avgShippingDelayHours": 24,                                                                                         
+    "avgDeliveryDelayHours": 72,
+    "period": { "startDate": "...", "endDate": "..." }                                                                   
+  }                                                                                                                      
+  Note : délais calculés via OrderStatusHistory (transitions vers processing / completed).                               
+                                                                                                                         
+  ---                                                                                                                    
+  6. GET /admin/revenue-breakdown — Ventilation du revenu
+                                                                                                                         
+  Query : startDate, endDate                                   
+                                                                                                                         
+  Réponse data (commandes paid uniquement) :                                                                             
+  {                                                                                                                      
+    "byCategory": [{ "categoryId", "categoryName", "revenue", "orderCount", "percentage" }],                             
+    "byPaymentMethod": [{ "method": "visa", "revenue": 146, "orderCount": 1, "percentage": 100 }],
+    "period": { ... }                                                                                                    
+  }                                                                                                                      
+  Note : method extrait de paymentMethodSnapshot.brand.                                                                  
+                                                                                                                         
+  ---                                                                                                                    
+  7. GET /admin/inventory-stats — État de l'inventaire
+                                                                                                                         
+  Query : startDate, endDate (la période sert à déterminer les produits "jamais vendus")
+                                                                                                                         
+  Réponse data :                                               
+  {                                                                                                                      
+    "totalStockValue": 8974,                                   
+    "byProductStatus": [{ "status": "published", "count": 4 }],
+    "neverSoldProducts": 2,                                                                                              
+    "top10ImmobilizedStock": [
+      { "productId", "productName", "stock": 50, "price": 119, "immobilizedValue": 5950 }                                
+    ]                                                                                                                    
+  }                                                                                                                      
+                                                                                                                         
+  ---                                                                                                                    
+  8. GET /admin/categories-stats — Performance par catégorie   
+                                                                                                                         
+  Query : startDate, endDate, limit (1-100, défaut 20)
+                                                                                                                         
+  Réponse data : tableau trié par CA décroissant               
+  [{ "categoryId", "categoryName", "revenue": 119,                                                                       
+     "distinctOrderCount": 1, "quantitySold": 1, "revenuePercentage": 79.87 }]
+                                                                                                                         
+  ---                                                                                                                    
+  9. GET /admin/refunds-stats — Avoirs / remboursements                                                                  
+                                                                                                                         
+  Query : startDate, endDate                                                                                             
+                                                                                                                         
+  Réponse data :
+  {                                                                                                                      
+    "totalAmount": 15,                                         
+    "totalCount": 1,  
+    "refundRate": 10.27,
+    "byReason": [{ "reason": "refund", "amount": 15, "count": 1 }],                                                      
+    "monthlyTimeline": [{ "month": "2026-04", "amount": 15, "count": 1 }],
+    "period": { ... }                                                                                                    
+  }                                                                                                                      
+  Note : reason ∈ cancellation|refund|error (enum credit_note_reason). refundRate = avoirs / CA total × 100.             
+                                                                                                                         
+  ---                                                                                                                    
+  10. GET /admin/geographic-stats — Répartition géographique
+                                                                                                                         
+  Query : startDate, endDate, limit (1-50, défaut 10, s'applique à topCities)
+                                                                                                                         
+  Réponse data :                                               
+  {                                                                                                                      
+    "byCountry": [{ "country": "FR", "orderCount": 1, "revenue": 146, "percentage": 100 }],
+    "topCities": [{ "city": "Paris", "country": "FR", "orderCount": 1, "revenue": 146 }],  
+    "period": { ... }                                                                                                    
+  }                                                                                                                      
+  Note : pays/ville extraits de addressSnapshot de l'Order. Commandes paid uniquement.                                   
+                                                                                                                         
+  ---                                                                                                                    
+  11. GET /admin/contact-stats — Messages de contact
+                                                                                                                         
+  Query : startDate, endDate                                   
+                                                                                                                         
+  Réponse data :                                               
+  {
+    "totalMessages": 10,
+    "byStatus": [{ "status": "unread", "count": 10 }],
+    "dailyTimeline": [{ "date": "2026-04-20", "count": 10 }],
+    "avgResponseTimeHours": null,                                                                                        
+    "processingRate": 0,         
+    "period": { ... }                                                                                                    
+  }                                                            
+  Note : avgResponseTimeHours est null si aucun message n'a encore de repliedAt.                                         
+                                                               
+  ---                                                                                                                    
+  12. GET /admin/export — Export de rapport
+                                                                                                                         
+  Query :                                                      
+  - reportType (requis) ∈ overview | sales | products | customers | orders | revenue | inventory | categories | refunds |
+   geographic | contact                                                                                                  
+  - format ∈ csv | json (défaut json)
+  - startDate, endDate                                                                                                   
+                                                               
+  Réponse : fichier téléchargeable (header Content-Disposition: attachment)
+  - JSON : application/json                                                                                              
+  - CSV : text/csv avec BOM UTF-8 (compatible Excel)                                                                     
+                                                                                                                         
+  Exemple : GET /admin/export?reportType=inventory&format=csv → analytics-inventory-2026-04-21.csv                       
+                                                                                                                         
+  ---                                                                                                                    
+  Exemples rapides (curl)                                                                                                
+                                                               
+  # Login
+  TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/login \
+    -H "Content-Type: application/json" \                                                                                
+    -d '{"email":"bob.admin@example.com","password":"Admin1234!"}' \
+    | jq -r .data.accessToken)                                                                                           
+                                                                                                                         
+  # KPI globaux                                                                                                          
+  curl -H "Authorization: Bearer $TOKEN" \                                                                               
+    "http://localhost:3000/api/v1/analytics/admin/overview"                                                              
+   
+  # Ventes mensuelles sur une période                                                                                    
+  curl -H "Authorization: Bearer $TOKEN" \                     
+    "http://localhost:3000/api/v1/analytics/admin/sales?startDate=2026-01-01T00:00:00.000Z&endDate=2026-12-31T23:59:59.00
+  0Z&groupBy=month"                                                                                                      
+                                                                                                                         
+  # Export catégories en CSV                                                                                             
+  curl -H "Authorization: Bearer $TOKEN" -OJ \                 
+    "http://localhost:3000/api/v1/analytics/admin/export?reportType=categories&format=csv"                               
+                                                               
+  Swagger live : http://localhost:3000/api-docs (tag Analytics) — chaque route a un @swagger JSDoc complet dans          
+  analytics.routes.ts.                                   

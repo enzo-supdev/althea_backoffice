@@ -1,17 +1,18 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { Upload, Loader2, X } from 'lucide-react'
 import PageHeader from '@/components/layout/PageHeader'
 import FormField from '@/components/ui/form/FormField'
 import FormActions from '@/components/ui/form/FormActions'
-import ProductImageManager from '@/components/ui/ProductImageManager'
 import { useToast } from '@/components/ui/ToastProvider'
 import { ApiError, categoriesApi, productsApi } from '@/lib/api'
+import { mediaApi } from '@/lib/api/mediaApi'
 import { formatCurrency } from '@/lib/utils'
 import type { Category } from '@/types'
 import type { CreateProductRequest } from '@/lib/api/types'
@@ -47,7 +48,10 @@ export default function NewProductPage() {
   const [categories, setCategories] = useState<Category[]>([])
   const [isLoadingCategories, setIsLoadingCategories] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [images, setImages] = useState<string[]>([])
+  const [mainImageRef, setMainImageRef] = useState<string | null>(null)
+  const [mainImagePreview, setMainImagePreview] = useState<string | null>(null)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const form = useForm<ProductFormValues>({
     resolver: zodResolver(productFormSchema),
@@ -133,9 +137,24 @@ export default function NewProductPage() {
   }, [pushToast])
 
   const canSubmit = useMemo(
-    () => !isSubmitting && !isLoadingCategories && categories.length > 0,
-    [categories.length, isLoadingCategories, isSubmitting]
+    () => !isSubmitting && !isLoadingCategories && !isUploadingImage && categories.length > 0,
+    [categories.length, isLoadingCategories, isSubmitting, isUploadingImage]
   )
+
+  const handleImageFile = async (file: File) => {
+    setIsUploadingImage(true)
+    setMainImagePreview(URL.createObjectURL(file))
+    try {
+      const uploaded = await mediaApi.upload(file)
+      setMainImageRef(uploaded.ref)
+    } catch {
+      pushToast({ type: 'error', title: 'Upload image échoué', message: 'L\'image n\'a pas pu être uploadée.' })
+      setMainImagePreview(null)
+      setMainImageRef(null)
+    } finally {
+      setIsUploadingImage(false)
+    }
+  }
 
   const handleSubmit = form.handleSubmit(async (values) => {
     setIsSubmitting(true)
@@ -151,25 +170,18 @@ export default function NewProductPage() {
         stock: values.stock,
         categoryId: values.categoryId,
         status: values.status,
+        ...(mainImageRef ? { mainImageRef } : {}),
       }
 
-      await productsApi.create(payload)
-
-      if (images.length > 0) {
-        pushToast({
-          type: 'info',
-          title: 'Images ajoutees en local',
-          message: 'Les images sont pretes cote front. Le rattachement API image sera active des que le backend media est branche.',
-        })
-      }
+      const created = await productsApi.create(payload)
 
       pushToast({
         type: 'success',
         title: 'Produit créé',
-        message: `${values.name} a été ajouté au catalogue.`,
+        message: `${values.name} a été ajouté.${mainImageRef ? '' : ' Vous pouvez maintenant ajouter des images.'}`,
       })
 
-      router.push('/products')
+      router.push(`/products/${created.id}?edit=1`)
     } catch (error) {
       pushToast({
         type: 'error',
@@ -317,11 +329,60 @@ export default function NewProductPage() {
           </select>
         </FormField>
 
-        <FormField label="Medias produit" htmlFor="product-images">
-          <div id="product-images">
-            <ProductImageManager images={images} onChange={setImages} />
+        <div>
+          <p className="mb-2 text-sm font-medium text-gray-700">Image principale <span className="font-normal text-gray-400">(optionnel)</span></p>
+          <div
+            className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              const file = e.dataTransfer.files?.[0]
+              if (file) void handleImageFile(file)
+            }}
+          >
+            {mainImagePreview ? (
+              <div className="flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={mainImagePreview} alt="Aperçu" className="h-16 w-16 rounded object-cover" />
+                <div className="flex-1 text-sm text-gray-600">
+                  {isUploadingImage ? 'Upload en cours...' : 'Image prête'}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setMainImagePreview(null); setMainImageRef(null) }}
+                  className="rounded p-1 text-gray-400 hover:text-status-error"
+                  title="Supprimer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <p className="flex-1 text-sm text-gray-500">Glisser-déposer ou choisir un fichier. D&apos;autres images pourront être ajoutées après création.</p>
+                <button
+                  type="button"
+                  disabled={isUploadingImage}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100 disabled:opacity-60"
+                >
+                  {isUploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  Choisir
+                </button>
+              </div>
+            )}
           </div>
-        </FormField>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) void handleImageFile(file)
+              e.target.value = ''
+            }}
+          />
+        </div>
 
         <FormActions>
           <Link

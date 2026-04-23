@@ -7,9 +7,33 @@ import {
   Product,
 } from './types';
 
+export interface CreateCarouselSlideInput {
+  imageRef: string;
+  title?: string | null;
+  textContent?: string | null;
+  redirectUrl?: string | null;
+  displayOrder?: number;
+  isActive?: boolean;
+  isMainImage?: boolean;
+}
+
+export interface UpdateCarouselSlideInput {
+  imageRef?: string | null;
+  title?: string | null;
+  textContent?: string | null;
+  redirectUrl?: string | null;
+  displayOrder?: number;
+  isActive?: boolean;
+  isMainImage?: boolean;
+}
+
 function normalizeCarouselList(payload: any): HomepageCarouselSlide[] {
   if (Array.isArray(payload)) {
     return payload;
+  }
+
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
   }
 
   if (Array.isArray(payload?.slides)) {
@@ -28,8 +52,19 @@ function normalizeCarouselSlide(payload: any): HomepageCarouselSlide {
 }
 
 export const homepageApi = {
+  /**
+   * GET /homepage/carousel — lecture publique (slides actifs uniquement).
+   */
   async getCarousel(): Promise<HomepageCarouselSlide[]> {
     const { data } = await axiosInstance.get<ApiResponse<HomepageCarouselSlide[]>>('/homepage/carousel');
+    return normalizeCarouselList(data.data);
+  },
+
+  /**
+   * GET /homepage/admin/carousel — liste admin (slides actifs + inactifs).
+   */
+  async getAdminCarousel(): Promise<HomepageCarouselSlide[]> {
+    const { data } = await axiosInstance.get<ApiResponse<HomepageCarouselSlide[]>>('/homepage/admin/carousel');
     return normalizeCarouselList(data.data);
   },
 
@@ -52,16 +87,26 @@ export const homepageApi = {
     return data.data;
   },
 
-  async createCarouselSlide(input: Partial<HomepageCarouselSlide>): Promise<HomepageCarouselSlide> {
+  /**
+   * POST /homepage/admin/carousel
+   * `imageRef` requis par la doc. Uploader d'abord l'image via /media/upload.
+   */
+  async createCarouselSlide(input: CreateCarouselSlideInput): Promise<HomepageCarouselSlide> {
     const { data } = await axiosInstance.post<ApiResponse<HomepageCarouselSlide>>('/homepage/admin/carousel', input);
     return normalizeCarouselSlide(data.data);
   },
 
-  async updateCarouselSlide(id: string, input: Partial<HomepageCarouselSlide>): Promise<HomepageCarouselSlide> {
+  /**
+   * PUT /homepage/admin/carousel/:id
+   */
+  async updateCarouselSlide(id: string, input: UpdateCarouselSlideInput): Promise<HomepageCarouselSlide> {
     const { data } = await axiosInstance.put<ApiResponse<HomepageCarouselSlide>>(`/homepage/admin/carousel/${id}`, input);
     return normalizeCarouselSlide(data.data);
   },
 
+  /**
+   * DELETE /homepage/admin/carousel/:id
+   */
   async deleteCarouselSlide(id: string): Promise<{ message: string }> {
     const { data } = await axiosInstance.delete<ApiResponse<{ message: string }>>(`/homepage/admin/carousel/${id}`);
     return data.data;

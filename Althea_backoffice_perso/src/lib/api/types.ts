@@ -66,6 +66,7 @@ export interface User {
   status: 'pending' | 'active' | 'suspended';
   emailVerifiedAt: string | null;
   lastLoginAt: string | null;
+  twoFaEnabled?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -74,9 +75,19 @@ export interface AuthResponse {
   user: User;
   accessToken: string;
   refreshToken: string;
-  twoFactorRequired?: boolean;
-  twoFactorChallengeId?: string;
 }
+
+export interface TwoFaRequiredResponse {
+  twoFaRequired: true;
+  tempToken: string;
+}
+
+export type LoginResponse = AuthResponse | TwoFaRequiredResponse;
+
+export const isTwoFaRequiredResponse = (
+  response: LoginResponse,
+): response is TwoFaRequiredResponse =>
+  (response as TwoFaRequiredResponse).twoFaRequired === true;
 
 export interface RefreshTokenResponse {
   accessToken: string;
@@ -100,22 +111,23 @@ export interface ChangePasswordRequest {
   newPassword: string;
 }
 
-export interface TwoFactorStatusResponse {
-  enabled: boolean;
-  method?: 'totp' | 'hotp';
-  recoveryCodesCount?: number;
-  provisioningUri?: string;
+export interface TwoFaSetupResponse {
+  secret: string;
+  qrCodeDataUrl: string;
 }
 
-export interface TwoFactorVerifyRequest {
+export interface TwoFaVerifyLoginRequest {
+  tempToken: string;
   code: string;
-  challengeId?: string;
 }
 
-export interface TwoFactorVerifyResponse {
-  verified: boolean;
-  accessToken?: string;
-  refreshToken?: string;
+export interface TwoFaConfirmRequest {
+  code: string;
+}
+
+export interface TwoFaDisableRequest {
+  code: string;
+  password: string;
 }
 
 // ============================================================================
@@ -170,6 +182,7 @@ export interface CreateProductRequest {
   stock: number;
   categoryId: string;
   status?: 'draft' | 'published';
+  mainImageRef?: string;
 }
 
 export interface UpdateProductRequest {
@@ -183,6 +196,7 @@ export interface UpdateProductRequest {
   categoryId?: string;
   status?: 'draft' | 'published' | 'archived';
   displayOrder?: number;
+  mainImageRef?: string;
 }
 
 export interface DuplicateProductRequest {
@@ -204,7 +218,7 @@ export interface BulkProductIdsRequest {
 }
 
 export interface BulkProductStatusRequest extends BulkProductIdsRequest {
-  status: 'draft' | 'published';
+  status: 'draft' | 'published' | 'archived';
 }
 
 export interface BulkProductCategoryRequest extends BulkProductIdsRequest {
@@ -212,11 +226,11 @@ export interface BulkProductCategoryRequest extends BulkProductIdsRequest {
 }
 
 export interface ProductImageRequest {
-  imageRef: string;
+  imageRefs: string[];
 }
 
 export interface ReorderProductImagesRequest {
-  images: Array<{ id: string; displayOrder: number }>;
+  imageIds: string[];
 }
 
 // ============================================================================
@@ -322,7 +336,8 @@ export interface UpdateUserStatusRequest {
 
 export interface SendUserEmailRequest {
   subject: string;
-  content: string;
+  message: string;
+  template?: 'NOTIFICATION' | 'MARKETING' | 'SUPPORT';
 }
 
 export interface AdminUserStats {
@@ -357,7 +372,7 @@ export interface Order {
   id: string;
   orderNumber: string;
   userId: string;
-  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  status: 'pending' | 'processing' | 'completed' | 'cancelled';
   subtotalHt: number;
   totalVat: number;
   totalTtc: number;
@@ -399,8 +414,10 @@ export interface Invoice {
 
 export interface CreditNoteRequest {
   amount: number;
-  reason: 'cancellation' | 'refund' | 'error';
+  /** Texte libre côté backend (ex: "Produit retourné défectueux"). */
+  reason: string;
   notes?: string;
+  sendEmail?: boolean;
 }
 
 export interface CreditNote {
@@ -423,7 +440,9 @@ export interface ContactMessage {
   name: string;
   subject: string;
   message: string;
-  status: 'pending' | 'resolved' | 'spam';
+  status: 'NEW' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  response?: string | null;
+  notes?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -440,7 +459,9 @@ export interface ReplyContactMessageRequest {
 }
 
 export interface UpdateContactMessageStatusRequest {
-  status: 'unread' | 'read' | 'processed';
+  status: 'NEW' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  response?: string;
+  notes?: string;
 }
 
 // ============================================================================
@@ -557,7 +578,22 @@ export interface SearchSuggestResponse {
   suggestions: SearchSuggestion[];
 }
 
+/**
+ * Réponse de POST /media/upload (upload unitaire).
+ * Le backend renvoie `mimetype` (tout en minuscules), pas `mimeType`.
+ */
 export interface MediaUploadResponse {
+  ref: string;
+  url: string;
+  mimetype: string;
+  size: number;
+}
+
+/**
+ * Un fichier renvoyé par POST /media/admin/bulk-upload. Shape différente
+ * de l'upload unitaire (contient filename et `mimeType` en camelCase).
+ */
+export interface MediaBulkUploadItem {
   ref: string;
   url: string;
   filename: string;
@@ -565,45 +601,254 @@ export interface MediaUploadResponse {
   size: number;
 }
 
+export interface MediaBulkUploadResponse {
+  files: MediaBulkUploadItem[];
+  count: number;
+}
+
+/**
+ * Période renvoyée par la plupart des endpoints analytics.
+ */
+export interface AnalyticsPeriod {
+  startDate: string;
+  endDate: string;
+}
+
+/**
+ * GET /analytics/admin/overview
+ * Shape plate renvoyée par l'API déployée.
+ */
 export interface AnalyticsOverview {
   overview: {
-    revenue: { total: number; change: number };
-    orders: { total: number; change: number };
-    customers: { total: number; new: number; change: number };
-    products: { total: number; outOfStock: number; lowStock: number };
+    totalRevenue: number;
+    totalOrders: number;
+    totalUsers: number;
+    totalProducts: number;
     averageOrderValue: number;
+    revenueGrowth: number;
+    newUsers: number;
     conversionRate: number;
+    period: AnalyticsPeriod;
   };
 }
 
+/**
+ * GET /analytics/admin/sales
+ * Tableau plat, un point par période groupée.
+ */
 export interface SalesTimelinePoint {
   period: string;
+  startDate: string;
+  endDate: string;
   revenue: number;
-  orders: number;
+  orderCount: number;
+  averageOrderValue: number;
 }
 
 export interface SalesAnalytics {
-  sales: {
-    summary: { totalRevenue: number; totalOrders: number };
-    timeline: SalesTimelinePoint[];
-    topProducts: Array<{ productId: string; productName: string; revenue: number; quantitySold: number }>;
-  };
+  sales: SalesTimelinePoint[];
+}
+
+/**
+ * GET /analytics/admin/products
+ */
+export interface TopProductItem {
+  productId: string;
+  productName: string;
+  quantitySold: number;
+  totalRevenue: number;
+  averagePrice: number;
+}
+
+export interface StockProductItem {
+  productId: string;
+  productName: string;
+  stock: number;
+  status: string;
+}
+
+export interface ProductsAnalytics {
+  topSellingProducts: TopProductItem[];
+  topRevenueProducts: TopProductItem[];
+  lowStockProducts: StockProductItem[];
+  outOfStockProducts: StockProductItem[];
+}
+
+/**
+ * GET /analytics/admin/customers
+ */
+export interface TopCustomerItem {
+  userId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  totalSpent: number;
+  orderCount: number;
+  averageOrderValue: number;
+  lifetimeValue: number;
 }
 
 export interface CustomerAnalytics {
-  customerAnalytics: {
-    summary: { total: number; new: number; returning: number; inactive: number };
-    topCustomers: Array<{ userId: string; fullName: string; totalSpent: number; totalOrders: number }>;
-    segments: { vip: number; regular: number; occasional: number };
-    retention: { rate: number; churnRate: number };
-  };
+  topCustomers: TopCustomerItem[];
+  newCustomers: number;
+  averageOrdersPerCustomer: number;
 }
 
+/**
+ * GET /analytics/admin/orders-stats
+ */
+export interface OrdersStatusBreakdown {
+  status: string;
+  count: number;
+  percentage: number;
+}
+
+export interface OrdersStatsAnalytics {
+  byOrderStatus: OrdersStatusBreakdown[];
+  byPaymentStatus: OrdersStatusBreakdown[];
+  cancellationRate: number;
+  avgShippingDelayHours: number | null;
+  avgDeliveryDelayHours: number | null;
+  period: AnalyticsPeriod;
+}
+
+/**
+ * GET /analytics/admin/revenue-breakdown
+ */
+export interface RevenueByCategory {
+  categoryId: string;
+  categoryName: string;
+  revenue: number;
+  orderCount: number;
+  percentage: number;
+}
+
+export interface RevenueByPaymentMethod {
+  method: string;
+  revenue: number;
+  orderCount: number;
+  percentage: number;
+}
+
+export interface RevenueBreakdownAnalytics {
+  byCategory: RevenueByCategory[];
+  byPaymentMethod: RevenueByPaymentMethod[];
+  period: AnalyticsPeriod;
+}
+
+/**
+ * GET /analytics/admin/inventory-stats
+ */
+export interface ImmobilizedStockItem {
+  productId: string;
+  productName: string;
+  stock: number;
+  price: number;
+  immobilizedValue: number;
+}
+
+export interface InventoryStatsAnalytics {
+  totalStockValue: number;
+  byProductStatus: Array<{ status: string; count: number }>;
+  neverSoldProducts: number;
+  top10ImmobilizedStock: ImmobilizedStockItem[];
+}
+
+/**
+ * GET /analytics/admin/categories-stats
+ */
+export interface CategoryStatsItem {
+  categoryId: string;
+  categoryName: string;
+  revenue: number;
+  distinctOrderCount: number;
+  quantitySold: number;
+  revenuePercentage: number;
+}
+
+export type CategoriesStatsAnalytics = CategoryStatsItem[];
+
+/**
+ * GET /analytics/admin/refunds-stats
+ */
+export interface RefundReasonBreakdown {
+  reason: 'cancellation' | 'refund' | 'error';
+  amount: number;
+  count: number;
+}
+
+export interface RefundTimelinePoint {
+  month: string;
+  amount: number;
+  count: number;
+}
+
+export interface RefundsStatsAnalytics {
+  totalAmount: number;
+  totalCount: number;
+  refundRate: number;
+  byReason: RefundReasonBreakdown[];
+  monthlyTimeline: RefundTimelinePoint[];
+  period: AnalyticsPeriod;
+}
+
+/**
+ * GET /analytics/admin/geographic-stats
+ */
+export interface CountryBreakdown {
+  country: string;
+  orderCount: number;
+  revenue: number;
+  percentage: number;
+}
+
+export interface CityBreakdown {
+  city: string;
+  country: string;
+  orderCount: number;
+  revenue: number;
+}
+
+export interface GeographicStatsAnalytics {
+  byCountry: CountryBreakdown[];
+  topCities: CityBreakdown[];
+  period: AnalyticsPeriod;
+}
+
+/**
+ * GET /analytics/admin/contact-stats
+ */
+export interface ContactStatusBreakdown {
+  status: string;
+  count: number;
+}
+
+export interface ContactDailyPoint {
+  date: string;
+  count: number;
+}
+
+export interface ContactStatsAnalytics {
+  totalMessages: number;
+  byStatus: ContactStatusBreakdown[];
+  dailyTimeline: ContactDailyPoint[];
+  avgResponseTimeHours: number | null;
+  processingRate: number;
+  period: AnalyticsPeriod;
+}
+
+export type LegalPageType =
+  | 'CGV'
+  | 'CGU'
+  | 'MENTIONS_LEGALES'
+  | 'POLITIQUE_CONFIDENTIALITE'
+  | 'COOKIES';
+
 export interface LegalPage {
-  id: string;
-  type: 'cgu' | 'mentions_legales' | 'about';
+  type: LegalPageType;
+  title: string;
   content: string;
-  lang: string;
+  version: string;
   updatedAt: string;
 }
 

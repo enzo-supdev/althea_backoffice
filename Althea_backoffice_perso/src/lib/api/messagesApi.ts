@@ -3,136 +3,247 @@ import {
   ApiResponse,
   PaginatedResponse,
   ReplyContactMessageRequest,
-  UpdateContactMessageStatusRequest,
 } from './types';
 
-function mapMessageToLegacy(message: any): any {
-  const statusMap: Record<string, any> = {
-    pending: 'unread',
-    unread: 'unread',
-    read: 'read',
-    replied: 'replied',
-    processed: 'closed',
-    resolved: 'closed',
-    spam: 'closed',
-    closed: 'closed',
-  };
+type RawContactMessage = {
+  id: string;
+  email: string;
+  subject: string;
+  message: string;
+  status: string;
+  userId?: string | null;
+  processedBy?: string | null;
+  processedAt?: string | null;
+  response?: string | null;
+  respondedAt?: string | null;
+  notes?: string | null;
+  replies?: Array<{
+    id?: string;
+    author?: string;
+    adminName?: string;
+    message?: string;
+    response?: string;
+    createdAt?: string;
+    respondedAt?: string;
+  }>;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+type ContactListEnvelope = {
+  success: boolean;
+  data:
+    | {
+        messages: RawContactMessage[];
+        pagination: { page: number; limit: number; total: number; totalPages: number };
+      }
+    | RawContactMessage[];
+  meta?: { page: number; limit: number; total: number; totalPages: number };
+};
+
+// Map API statuses (lowercase actuels : unread/read/processed/closed + alias) vers les statuts UI.
+function mapApiStatusToUi(status: string): 'unread' | 'read' | 'replied' | 'closed' {
+  const normalized = (status ?? '').toLowerCase();
+  switch (normalized) {
+    case 'unread':
+    case 'new':
+    case 'pending':
+      return 'unread';
+    case 'read':
+    case 'in_progress':
+    case 'open':
+      return 'read';
+    case 'processed':
+    case 'replied':
+    case 'resolved':
+      return 'replied';
+    case 'closed':
+    case 'spam':
+      return 'closed';
+    default:
+      return 'read';
+  }
+}
+
+// Map UI statuses vers le vocabulaire attendu par le backend (lowercase).
+function mapUiStatusToApi(status: string): string {
+  const normalized = status.toLowerCase();
+  switch (normalized) {
+    case 'unread':
+      return 'unread';
+    case 'read':
+      return 'read';
+    case 'replied':
+    case 'resolved':
+      return 'processed';
+    case 'closed':
+    case 'processed':
+      return 'closed';
+    default:
+      return normalized;
+  }
+}
+
+function mapMessageToLegacy(message: RawContactMessage) {
+  const rawReplies = Array.isArray(message.replies) ? message.replies : [];
+  const mappedReplies = rawReplies.map((reply) => ({
+    id: String(reply.id ?? `${message.id}-reply-${reply.createdAt ?? ''}`),
+    author: reply.author ?? reply.adminName ?? 'Support',
+    message: reply.message ?? reply.response ?? '',
+    createdAt: new Date(reply.createdAt ?? reply.respondedAt ?? message.updatedAt ?? message.createdAt),
+  }));
+
+  // Le détail d'un message peut contenir un `response` + `respondedAt` : on reconstitue un reply.
+  if (mappedReplies.length === 0 && typeof message.response === 'string' && message.response.trim()) {
+    mappedReplies.push({
+      id: `${message.id}-response`,
+      author: 'Support',
+      message: message.response,
+      createdAt: new Date(message.respondedAt ?? message.processedAt ?? message.updatedAt ?? message.createdAt),
+    });
+  }
 
   return {
-    ...message,
-    status: statusMap[message.status] ?? 'read',
-    replies: Array.isArray(message.replies)
-      ? message.replies.map((reply: any) => ({
-          ...reply,
-          createdAt: new Date(reply.createdAt),
-        }))
-      : [],
+    id: message.id,
+    email: message.email,
+    subject: message.subject,
+    message: message.message,
+    status: mapApiStatusToUi(message.status),
+    replies: mappedReplies,
+    userId: message.userId ?? null,
+    processedBy: message.processedBy ?? null,
+    processedAt: message.processedAt ? new Date(message.processedAt) : null,
     createdAt: new Date(message.createdAt),
     updatedAt: new Date(message.updatedAt ?? message.createdAt),
   };
 }
 
-/**
- * Gestion des messages de contact (chat, support)
- */
+function extractListPayload(envelope: ContactListEnvelope) {
+  const { data } = envelope;
+
+  if (Array.isArray(data)) {
+    return {
+      items: data,
+      pagination: envelope.meta ?? { page: 1, limit: data.length, total: data.length, totalPages: 1 },
+    };
+  }
+
+  if (data && typeof data === 'object' && Array.isArray(data.messages)) {
+    return {
+      items: data.messages,
+      pagination: data.pagination ?? envelope.meta ?? {
+        page: 1,
+        limit: data.messages.length,
+        total: data.messages.length,
+        totalPages: 1,
+      },
+    };
+  }
+
+  return {
+    items: [],
+    pagination: envelope.meta ?? { page: 1, limit: 0, total: 0, totalPages: 0 },
+  };
+}
+
 export const messagesApi = {
   /**
    * GET /contact/admin/messages
-   * Compatibilité legacy : liste de messages sans pagination
+   * Renvoie la liste complète (sans pagination exposée) pour les usages legacy
+   * (header de recherche, stats dashboard).
    */
-  async list(): Promise<any[]> {
-    const { data } = await axiosInstance.get<any>('/contact/admin/messages');
-    const items: any[] = Array.isArray(data.data)
-      ? data.data
-      : Array.isArray((data as any).messages)
-        ? (data as any).messages
-        : Array.isArray(data)
-          ? data
-          : [];
+  async list() {
+    const { data } = await axiosInstance.get<ContactListEnvelope>('/contact/admin/messages', {
+      params: { page: 1, limit: 100 },
+    });
+    const { items } = extractListPayload(data);
     return items.map(mapMessageToLegacy);
   },
 
   /**
    * GET /contact/admin/messages
-   * Liste paginée des messages de contact
+   * Liste paginée.
    */
   async listContactMessages(params?: {
-    status?: 'unread' | 'read' | 'processed';
+    status?: string;
+    search?: string;
+    startDate?: string;
+    endDate?: string;
     page?: number;
     limit?: number;
     sortBy?: 'createdAt';
+    order?: 'asc' | 'desc';
     sortOrder?: 'asc' | 'desc';
-  }): Promise<PaginatedResponse<any>> {
-    const { data } = await axiosInstance.get<any>(
-      '/contact/admin/messages',
-      { params }
-    );
-    const items: any[] = Array.isArray(data.data)
-      ? data.data
-      : Array.isArray((data as any).messages)
-        ? (data as any).messages
-        : Array.isArray(data)
-          ? data
-          : [];
+  }): Promise<PaginatedResponse<ReturnType<typeof mapMessageToLegacy>>> {
+    const { sortOrder, status, ...rest } = params ?? {};
+    const queryParams: Record<string, string | number | undefined> = {
+      ...rest,
+      order: rest.order ?? sortOrder,
+    };
+    if (status && status !== 'all') {
+      queryParams.status = mapUiStatusToApi(status);
+    }
+
+    const { data } = await axiosInstance.get<ContactListEnvelope>('/contact/admin/messages', {
+      params: queryParams,
+    });
+    const { items, pagination } = extractListPayload(data);
+
     return {
-      ...data,
+      success: true,
       data: items.map(mapMessageToLegacy),
+      meta: pagination,
     };
   },
 
   /**
    * GET /contact/admin/messages/:id
-   * Détail d'un message
    */
-  async getContactMessage(id: string): Promise<any> {
-    const { data } = await axiosInstance.get<ApiResponse<any>>(
-      `/contact/admin/messages/${id}`
+  async getContactMessage(id: string) {
+    const { data } = await axiosInstance.get<ApiResponse<RawContactMessage>>(
+      `/contact/admin/messages/${id}`,
     );
     return mapMessageToLegacy(data.data);
   },
 
   /**
    * PUT /contact/admin/messages/:id/status
-   * Marquer comme lu ou résolu
    */
   async updateContactMessageStatus(
     id: string,
-    input: UpdateContactMessageStatusRequest
-  ): Promise<any> {
-    const { data } = await axiosInstance.put<ApiResponse<any>>(
+    input: { status: string; response?: string; notes?: string },
+  ) {
+    const { data } = await axiosInstance.put<ApiResponse<RawContactMessage>>(
       `/contact/admin/messages/${id}/status`,
-      input
+      {
+        status: mapUiStatusToApi(input.status),
+        response: input.response,
+        notes: input.notes,
+      },
     );
     return mapMessageToLegacy(data.data);
   },
 
   /**
-   * POST /contact/admin/messages/:id/reply
-   * Répond à un message de contact
+   * PUT /contact/admin/messages/:id/status
+   * Marque le message comme traité (`processed`) avec la réponse de l'admin.
    */
-  async replyContactMessage(id: string, input: ReplyContactMessageRequest): Promise<any> {
-    const { data } = await axiosInstance.post<ApiResponse<any>>(
-      `/contact/admin/messages/${id}/reply`,
-      input
+  async replyContactMessage(id: string, input: ReplyContactMessageRequest) {
+    const { data } = await axiosInstance.put<ApiResponse<RawContactMessage>>(
+      `/contact/admin/messages/${id}/status`,
+      { status: 'processed', response: input.reply },
     );
     return mapMessageToLegacy(data.data);
   },
 
   /**
    * DELETE /contact/admin/messages/:id
-   * Supprimer un message
-   * Retourne 204 No Content
    */
   async deleteContactMessage(id: string): Promise<void> {
-    await axiosInstance.delete(
-      `/contact/admin/messages/${id}`
-    );
+    await axiosInstance.delete(`/contact/admin/messages/${id}`);
   },
 
-  /**
-   * Compatibilité legacy : persistance factice pour l'UI historique.
-   */
-  async save(_nextMessages: any[]): Promise<void> {
+  async save(_nextMessages: unknown): Promise<void> {
     return;
   },
 };

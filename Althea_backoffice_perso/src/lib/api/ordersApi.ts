@@ -3,8 +3,6 @@ import {
   Order,
   ApiResponse,
   PaginatedResponse,
-  UpdateOrderStatusRequest,
-  Invoice,
 } from './types';
 
 function toNumber(value: unknown): number {
@@ -87,8 +85,10 @@ function mapOrderToLegacy(order: any): any {
   const statusMap: Record<string, any> = {
     pending: 'pending',
     processing: 'processing',
+    // Conservé pour compat si l'API renvoyait un jour `shipped`/`delivered`.
     shipped: 'processing',
     delivered: 'completed',
+    completed: 'completed',
     cancelled: 'cancelled',
   };
 
@@ -197,11 +197,42 @@ export const ordersApi = {
 
   /**
    * POST /orders/checkout
-   * Crée une commande depuis le panier utilisateur courant (endpoint legacy)
+   * Crée une commande depuis le panier utilisateur courant.
+   * Body requis : shippingAddressId, paymentMethodId, shippingMethod.
    */
-  async createFromCheckout(input?: { addressId?: string }): Promise<any> {
-    const { data } = await axiosInstance.post<ApiResponse<Order>>('/orders/checkout', input ?? {});
+  async createFromCheckout(input: {
+    shippingAddressId: string;
+    paymentMethodId: string;
+    shippingMethod: 'STANDARD' | 'EXPRESS' | 'PICKUP';
+    couponCode?: string;
+  }): Promise<any> {
+    const { data } = await axiosInstance.post<ApiResponse<Order>>('/orders/checkout', input);
     return mapOrderToLegacy(data.data);
+  },
+
+  /**
+   * POST /orders/:id/cancel
+   * Annule une commande (utilisateur propriétaire).
+   */
+  async cancel(id: string): Promise<any> {
+    const { data } = await axiosInstance.post<ApiResponse<Order>>(`/orders/${id}/cancel`);
+    return mapOrderToLegacy(data.data);
+  },
+
+  /**
+   * GET /orders/admin/export
+   * Export CSV des commandes (admin).
+   */
+  async exportAdmin(params?: {
+    startDate?: string;
+    endDate?: string;
+    status?: 'pending' | 'processing' | 'completed' | 'cancelled';
+  }): Promise<Blob> {
+    const { data } = await axiosInstance.get<Blob>('/orders/admin/export', {
+      params,
+      responseType: 'blob',
+    });
+    return data;
   },
 
   /**
@@ -209,7 +240,7 @@ export const ordersApi = {
    * Liste les commandes de l'utilisateur connecté
    */
   async listMyOrders(params?: {
-    status?: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+    status?: 'pending' | 'processing' | 'completed' | 'cancelled';
     page?: number;
     limit?: number;
     sortBy?: 'createdAt' | 'total';
@@ -234,6 +265,10 @@ export const ordersApi = {
   async listAdmin(params?: {
     page?: number;
     limit?: number;
+    status?: 'pending' | 'processing' | 'completed' | 'cancelled';
+    search?: string;
+    startDate?: string;
+    endDate?: string;
     sortBy?: 'createdAt' | 'total';
     sortOrder?: 'asc' | 'desc';
   }): Promise<PaginatedResponse<Order>> {
@@ -253,7 +288,7 @@ export const ordersApi = {
    * GET /orders/admin/:id
    * Détail d'une commande
    */
-  async getById(id: string): Promise<Order> {
+  async getById(id: string): Promise<any> {
     const { data } = await axiosInstance.get<ApiResponse<Order>>(
       `/orders/admin/${id}`
     );
@@ -262,30 +297,46 @@ export const ordersApi = {
 
   /**
    * PUT /orders/admin/:id/status
-   * Met à jour le statut d'une commande
+   * Met à jour le statut d'une commande.
+   * Le backend attend les statuts en lowercase (`pending`, `processing`,
+   * `shipped`, `delivered`, `cancelled`). On normalise les alias UI ici.
    */
-  async updateStatus(id: string, input: UpdateOrderStatusRequest): Promise<Order> {
+  async updateStatus(
+    id: string,
+    input: { status: string; trackingNumber?: string; notes?: string; comment?: string }
+  ): Promise<any> {
+    // Le backend utilise l'enum `pending | processing | completed | cancelled`
+    // (confirmé via GET /orders/admin). Les alias legacy UI (`shipped`,
+    // `delivered`) sont rabattus sur les valeurs réelles.
+    const statusMap: Record<string, string> = {
+      pending: 'pending',
+      processing: 'processing',
+      shipped: 'processing',
+      delivered: 'completed',
+      completed: 'completed',
+      cancelled: 'cancelled',
+    };
+    const normalizedStatus = statusMap[input.status.toLowerCase()] ?? input.status.toLowerCase();
+
+    // Payload minimal : on ne relaie que les champs documentés côté backend
+    // (status + trackingNumber/notes optionnels). On omet tout champ undefined.
+    const payload: Record<string, unknown> = { status: normalizedStatus };
+    if (input.trackingNumber) payload.trackingNumber = input.trackingNumber;
+    if (input.notes) payload.notes = input.notes;
+
+    console.info('[ordersApi.updateStatus] payload envoyé:', JSON.stringify(payload));
+
     const { data } = await axiosInstance.put<ApiResponse<Order>>(
       `/orders/admin/${id}/status`,
-      input
+      payload
     );
     return mapOrderToLegacy(data.data);
   },
 
   /**
-   * POST /orders/admin/:id/invoice
-   * Génère la facture associée à la commande
-   */
-  async generateInvoice(id: string): Promise<Invoice> {
-    const { data } = await axiosInstance.post<ApiResponse<Invoice>>(
-      `/orders/admin/${id}/invoice`
-    );
-    return data.data;
-  },
-
-  /**
-   * POST /orders/admin/:id/refund
-   * Traite un remboursement
+   * ⚠️ Endpoint non documenté côté backend (API_ENDPOINTS.md).
+   * Le flux officiel de remboursement passe par POST /invoices/admin/:invoiceId/credit-note
+   * (voir invoicesApi.createCreditNote). Cette méthode est conservée pour compat UI.
    */
   async processRefund(id: string, input?: { reason?: string }): Promise<{ message: string }> {
     const { data } = await axiosInstance.post<ApiResponse<{ message: string }>>(

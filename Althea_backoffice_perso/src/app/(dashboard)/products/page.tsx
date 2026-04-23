@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { Plus, Download, Trash2, Edit, Eye } from 'lucide-react'
+import ExportButton from '@/components/ui/ExportButton'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -12,9 +13,10 @@ import Pagination from '@/components/ui/Pagination'
 import SearchBar from '@/components/ui/SearchBar'
 import Badge from '@/components/ui/Badge'
 import Modal from '@/components/ui/Modal'
+import ProductImageManager from '@/components/ui/ProductImageManager'
 import { useToast } from '@/components/ui/ToastProvider'
-import { Category, Product } from '@/types'
-import { categoriesApi, productsApi, ApiError } from '@/lib/api'
+import { Category, Product, ProductImage } from '@/types'
+import { categoriesApi, productsApi, ApiError, resolveMediaUrl } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import PageHeader from '@/components/layout/PageHeader'
 import FormActions from '@/components/ui/form/FormActions'
@@ -27,7 +29,6 @@ const baseProductFormSchema = z.object({
   tva: z.number(),
   categoryId: z.string().trim().min(1, 'La categorie est requise.'),
   stock: z.number().int().min(0, 'Le stock doit etre superieur ou egal a 0.'),
-  imageUrl: z.union([z.string().trim().url('URL image invalide.'), z.literal('')]),
 }).superRefine((values, context) => {
   if (![20, 10, 5.5, 0].includes(values.tva)) {
     context.addIssue({
@@ -39,8 +40,24 @@ const baseProductFormSchema = z.object({
 })
 
 const editProductFormSchema = baseProductFormSchema.extend({
-  status: z.enum(['published', 'draft']),
+  status: z.enum(['published', 'draft', 'archived']),
 })
+
+const toSlug = (text: string) =>
+  text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+
+const getProductHeroUrl = (product: Product): string => {
+  if (product.mainImageRef) {
+    const matching = product.images.find((img) => img.imageRef === product.mainImageRef)
+    return matching?.url ?? resolveMediaUrl(product.mainImageRef)
+  }
+  return product.images[0]?.url ?? ''
+}
 
 type AddProductFormValues = z.infer<typeof baseProductFormSchema>
 type EditProductFormValues = z.infer<typeof editProductFormSchema>
@@ -78,7 +95,6 @@ export default function ProductsPage() {
       tva: 20,
       categoryId: '',
       stock: 0,
-      imageUrl: '',
     },
   })
 
@@ -92,14 +108,8 @@ export default function ProductsPage() {
       categoryId: '',
       stock: 0,
       status: 'draft',
-      imageUrl: '',
     },
   })
-
-  const addImagePreview = addProductForm.watch('imageUrl')
-  const addNamePreview = addProductForm.watch('name')
-  const editImagePreview = editProductForm.watch('imageUrl')
-  const editNamePreview = editProductForm.watch('name')
 
   useEffect(() => {
     let isMounted = true
@@ -156,21 +166,9 @@ export default function ProductsPage() {
     }
   }, [pushToast])
 
-  const persistProducts = async (nextProducts: Product[]) => {
-    setProducts(nextProducts)
-
-    try {
-      await productsApi.save(nextProducts)
-    } catch (error) {
-      pushToast({
-        type: 'error',
-        title: 'Sauvegarde impossible',
-        message: error instanceof ApiError ? error.message : 'La synchronisation locale a echoue.',
-      })
-    }
-  }
-
   const retryLoadData = () => {
+    setIsLoading(true)
+    setLoadError('')
     void Promise.allSettled([productsApi.listBackoffice(), categoriesApi.list()])
       .then(([productsResult, categoriesResult]) => {
         if (productsResult.status === 'rejected') {
@@ -191,6 +189,7 @@ export default function ProductsPage() {
         }
       })
       .catch((error) => {
+        setIsLoading(false)
         setLoadError('Le catalogue produit est indisponible.')
         pushToast({
           type: 'error',
@@ -201,47 +200,6 @@ export default function ProductsPage() {
               : 'La tentative de rechargement des produits a echoue. Verifiez l\'API puis reessayez.',
         })
       })
-  }
-
-  const buildProductFromForm = (
-    productId: string,
-    baseProduct: Product | null,
-    values: {
-      name: string
-      description: string
-      priceHT: string
-      tva: string
-      categoryId: string
-      stock: string
-      status?: Product['status']
-      imageUrl: string
-    },
-  ) => {
-    const category = categories.find((item) => item.id === values.categoryId)
-    const priceHT = Number(values.priceHT)
-    const tva = Number(values.tva)
-    const stock = Number(values.stock)
-
-    if (!values.name.trim() || !category || Number.isNaN(priceHT) || Number.isNaN(stock)) {
-      return null
-    }
-
-    const price = Number((priceHT * (1 + tva / 100)).toFixed(2))
-
-    return {
-      id: productId,
-      name: values.name.trim(),
-      description: values.description.trim(),
-      price,
-      priceHT,
-      tva,
-      stock,
-      status: values.status ?? baseProduct?.status ?? 'draft',
-      category,
-      images: values.imageUrl.trim() ? [values.imageUrl.trim()] : baseProduct?.images ?? [],
-      createdAt: baseProduct?.createdAt ?? new Date(),
-      updatedAt: new Date(),
-    } satisfies Product
   }
 
   const selectedProductsSet = useMemo(() => new Set(selectedProducts), [selectedProducts])
@@ -363,19 +321,27 @@ export default function ProductsPage() {
   const handleBulkStatusUpdate = async (nextStatus: Product['status']) => {
     if (selectedProducts.length === 0) return
 
-    const nextProducts: Product[] = products.map((product) =>
-      selectedProductsSet.has(product.id)
-        ? { ...product, status: nextStatus, updatedAt: new Date() }
-        : product
-    )
-
-    await persistProducts(nextProducts)
-
-    pushToast({
-      type: 'success',
-      title: 'Produits mis a jour',
-      message: `${selectedProducts.length} produit${selectedProducts.length > 1 ? 's' : ''} modifie${selectedProducts.length > 1 ? 's' : ''}.`,
-    })
+    try {
+      await productsApi.bulkUpdateStatus({ productIds: selectedProducts, status: nextStatus })
+      setProducts((prev) =>
+        prev.map((product) =>
+          selectedProductsSet.has(product.id)
+            ? { ...product, status: nextStatus, updatedAt: new Date() }
+            : product
+        )
+      )
+      pushToast({
+        type: 'success',
+        title: 'Produits mis a jour',
+        message: `${selectedProducts.length} produit${selectedProducts.length > 1 ? 's' : ''} modifie${selectedProducts.length > 1 ? 's' : ''}.`,
+      })
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Erreur statut',
+        message: error instanceof ApiError ? error.message : 'La mise a jour du statut a echoue.',
+      })
+    }
   }
 
   const handleBulkCategoryUpdate = async () => {
@@ -391,19 +357,27 @@ export default function ProductsPage() {
       return
     }
 
-    const nextProducts: Product[] = products.map((product) =>
-      selectedProductsSet.has(product.id)
-        ? { ...product, category: targetCategory, updatedAt: new Date() }
-        : product
-    )
-
-    await persistProducts(nextProducts)
-
-    pushToast({
-      type: 'success',
-      title: 'Categorie mise a jour',
-      message: `${selectedProducts.length} produit${selectedProducts.length > 1 ? 's' : ''} reclassifie${selectedProducts.length > 1 ? 's' : ''}.`,
-    })
+    try {
+      await productsApi.bulkUpdateCategory({ productIds: selectedProducts, categoryId: bulkCategoryId })
+      setProducts((prev) =>
+        prev.map((product) =>
+          selectedProductsSet.has(product.id)
+            ? { ...product, category: targetCategory, updatedAt: new Date() }
+            : product
+        )
+      )
+      pushToast({
+        type: 'success',
+        title: 'Categorie mise a jour',
+        message: `${selectedProducts.length} produit${selectedProducts.length > 1 ? 's' : ''} reclassifie${selectedProducts.length > 1 ? 's' : ''}.`,
+      })
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Erreur categorie',
+        message: error instanceof ApiError ? error.message : 'La mise a jour de la categorie a echoue.',
+      })
+    }
   }
 
   const openDeleteConfirm = (ids: string[]) => {
@@ -413,40 +387,54 @@ export default function ProductsPage() {
   }
 
   const handleConfirmedDelete = async () => {
-    const targetIds = new Set(deleteTargetIds)
-    const nextProducts = products.filter((product) => !targetIds.has(product.id))
-    await persistProducts(nextProducts)
-    setSelectedProducts((prev) => prev.filter((id) => !targetIds.has(id)))
-    setIsDeleteConfirmOpen(false)
-    setDeleteTargetIds([])
-
-    pushToast({
-      type: 'success',
-      title: 'Suppression effectuee',
-      message: 'La selection de produits a ete supprimee.',
-    })
+    try {
+      if (deleteTargetIds.length === 1) {
+        await productsApi.delete(deleteTargetIds[0])
+      } else {
+        await productsApi.bulkDelete({ productIds: deleteTargetIds })
+      }
+      const targetIds = new Set(deleteTargetIds)
+      setProducts((prev) => prev.filter((product) => !targetIds.has(product.id)))
+      setSelectedProducts((prev) => prev.filter((id) => !targetIds.has(id)))
+      setIsDeleteConfirmOpen(false)
+      setDeleteTargetIds([])
+      pushToast({
+        type: 'success',
+        title: 'Suppression effectuee',
+        message: 'La selection de produits a ete supprimee.',
+      })
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Erreur suppression',
+        message: error instanceof ApiError ? error.message : 'La suppression a echoue.',
+      })
+    }
   }
 
   const handleRowStatusToggle = async (productId: string) => {
-    const nextProducts: Product[] = products.map((product) =>
-      product.id === productId
-        ? {
-            ...product,
-            status: product.status === 'published' ? 'draft' : 'published',
-            updatedAt: new Date(),
-          }
-        : product
-    )
+    const target = products.find((product) => product.id === productId)
+    if (!target) return
 
-    const target = nextProducts.find((product) => product.id === productId)
+    const nextStatus = target.status === 'published' ? 'draft' : 'published'
 
-    await persistProducts(nextProducts)
-
-    if (target) {
+    try {
+      await productsApi.updateStatus(productId, { status: nextStatus })
+      setProducts((prev) =>
+        prev.map((product) =>
+          product.id === productId ? { ...product, status: nextStatus, updatedAt: new Date() } : product
+        )
+      )
       pushToast({
         type: 'info',
         title: 'Statut bascule',
         message: `${target.name} a ete mis a jour.`,
+      })
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Erreur statut',
+        message: error instanceof ApiError ? error.message : 'Le changement de statut a echoue.',
       })
     }
   }
@@ -461,87 +449,86 @@ export default function ProductsPage() {
       categoryId: product.category.id,
       stock: product.stock,
       status: product.status,
-      imageUrl: product.images[0] ?? '',
     })
     setIsEditModalOpen(true)
   }
 
-  const handleAddProduct = addProductForm.handleSubmit(async (values) => {
-    const newProduct = buildProductFromForm(`prod-${Date.now()}`, null, {
-      name: values.name,
-      description: values.description,
-      priceHT: String(values.priceHT),
-      tva: String(values.tva),
-      categoryId: values.categoryId,
-      stock: String(values.stock),
-      imageUrl: values.imageUrl,
-    })
+  const handleEditImagesChange = (nextImages: ProductImage[]) => {
+    setEditingProduct((prev) => prev ? { ...prev, images: nextImages } : prev)
+    setProducts((prev) =>
+      prev.map((p) => (editingProduct && p.id === editingProduct.id ? { ...p, images: nextImages } : p))
+    )
+  }
 
-    if (!newProduct) {
-      addProductForm.setError('categoryId', {
-        type: 'manual',
-        message: 'La categorie selectionnee est introuvable.',
+  const handleEditMainImageRefChange = (nextMainImageRef: string | null) => {
+    setEditingProduct((prev) => prev ? { ...prev, mainImageRef: nextMainImageRef } : prev)
+    setProducts((prev) =>
+      prev.map((p) => (editingProduct && p.id === editingProduct.id ? { ...p, mainImageRef: nextMainImageRef } : p))
+    )
+  }
+
+  const handleAddProduct = addProductForm.handleSubmit(async (values) => {
+    try {
+      const created = await productsApi.create({
+        name: values.name.trim(),
+        slug: toSlug(values.name),
+        description: values.description.trim(),
+        shortDescription: '',
+        priceHt: values.priceHT,
+        vatRate: values.tva,
+        categoryId: values.categoryId,
+        stock: values.stock,
+        status: 'draft',
       })
+      setProducts((prev) => [created, ...prev])
+      setIsAddModalOpen(false)
+      addProductForm.reset()
+      pushToast({
+        type: 'success',
+        title: 'Produit ajoute',
+        message: `${created.name} a ete cree en brouillon.`,
+      })
+    } catch (error) {
       pushToast({
         type: 'error',
-        title: 'Formulaire incomplet',
-        message: 'Renseignez les champs obligatoires du produit.',
+        title: 'Erreur creation',
+        message: error instanceof ApiError ? error.message : 'La creation du produit a echoue.',
       })
-      return
     }
-
-    await persistProducts([newProduct, ...products])
-    setIsAddModalOpen(false)
-    addProductForm.reset()
-
-    pushToast({
-      type: 'success',
-      title: 'Produit ajoute',
-      message: `${newProduct.name} a ete cree en brouillon.`,
-    })
   })
 
   const handleUpdateProduct = editProductForm.handleSubmit(async (values) => {
     if (!editingProduct) return
 
-    const updatedProduct = buildProductFromForm(editingProduct.id, editingProduct, {
-      name: values.name,
-      description: values.description,
-      priceHT: String(values.priceHT),
-      tva: String(values.tva),
-      categoryId: values.categoryId,
-      stock: String(values.stock),
-      status: values.status,
-      imageUrl: values.imageUrl,
-    })
-
-    if (!updatedProduct) {
-      editProductForm.setError('categoryId', {
-        type: 'manual',
-        message: 'La categorie selectionnee est introuvable.',
+    try {
+      const updated = await productsApi.update(editingProduct.id, {
+        name: values.name.trim(),
+        slug: toSlug(values.name),
+        description: values.description.trim(),
+        priceHt: values.priceHT,
+        vatRate: values.tva,
+        categoryId: values.categoryId,
+        stock: values.stock,
+        status: values.status,
       })
+      setProducts((prev) =>
+        prev.map((product) => (product.id === editingProduct.id ? updated : product))
+      )
+      setIsEditModalOpen(false)
+      setEditingProduct(null)
+      editProductForm.reset()
+      pushToast({
+        type: 'success',
+        title: 'Produit mis a jour',
+        message: `${updated.name} a ete enregistre.`,
+      })
+    } catch (error) {
       pushToast({
         type: 'error',
-        title: 'Formulaire incomplet',
-        message: 'Renseignez les champs obligatoires du produit.',
+        title: 'Erreur mise a jour',
+        message: error instanceof ApiError ? error.message : 'La mise a jour du produit a echoue.',
       })
-      return
     }
-
-    const nextProducts = products.map((product) =>
-      product.id === editingProduct.id ? updatedProduct : product
-    )
-
-    await persistProducts(nextProducts)
-    setIsEditModalOpen(false)
-    setEditingProduct(null)
-    editProductForm.reset()
-
-    pushToast({
-      type: 'success',
-      title: 'Produit mis a jour',
-      message: `${updatedProduct.name} a ete enregistre.`,
-    })
   })
 
   const handleBulkExport = (format: 'csv' | 'excel') => {
@@ -619,11 +606,13 @@ export default function ProductsPage() {
     {
       key: 'image',
       label: 'Image',
-      render: (product) => (
+      render: (product) => {
+        const heroUrl = getProductHeroUrl(product)
+        return (
         <div className="relative h-12 w-12 overflow-hidden rounded-lg bg-gray-100">
-          {product.images[0] ? (
+          {heroUrl ? (
             <Image
-              src={product.images[0]}
+              src={heroUrl}
               alt={product.name}
               width={48}
               height={48}
@@ -636,7 +625,8 @@ export default function ProductsPage() {
             </div>
           )}
         </div>
-      ),
+        )
+      },
     },
     {
       key: 'name',
@@ -701,9 +691,16 @@ export default function ProductsPage() {
       label: 'Statut',
       sortable: true,
       render: (product) => (
-        <Badge variant={product.status === 'published' ? 'success' : 'default'}>
-          {product.status === 'published' ? 'Publié' : 'Brouillon'}
-        </Badge>
+        <button
+          type="button"
+          onClick={() => handleRowStatusToggle(product.id)}
+          title={product.status === 'published' ? 'Cliquer pour mettre en brouillon' : 'Cliquer pour publier'}
+          className="rounded transition-opacity hover:opacity-70"
+        >
+          <Badge variant={product.status === 'published' ? 'success' : 'default'}>
+            {product.status === 'published' ? 'Publié' : 'Brouillon'}
+          </Badge>
+        </button>
       ),
     },
     {
@@ -753,13 +750,20 @@ export default function ProductsPage() {
         title="Gestion des produits"
         description={`${filteredProducts.length} produit${filteredProducts.length > 1 ? 's' : ''} dans le catalogue.`}
         actions={(
-          <button
-            onClick={() => setIsAddModalOpen(true)}
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            <Plus className="h-5 w-5" />
-            Ajouter un produit
-          </button>
+          <>
+            <ExportButton
+              fetcher={() => productsApi.exportCsv()}
+              filename={`produits-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Exporter CSV"
+            />
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="btn-primary inline-flex items-center gap-2"
+            >
+              <Plus className="h-5 w-5" />
+              Ajouter un produit
+            </button>
+          </>
         )}
       />
 
@@ -975,20 +979,23 @@ export default function ProductsPage() {
         {viewProduct && (
           <div className="space-y-4 text-sm text-gray-700">
             <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
-              {viewProduct.images[0] ? (
-                <Image
-                  src={viewProduct.images[0]}
-                  alt={viewProduct.name}
-                  width={720}
-                  height={320}
-                  className="h-56 w-full object-cover"
-                  unoptimized
-                />
-              ) : (
-                <div className="flex h-56 items-center justify-center text-gray-400">
-                  Aucune image
-                </div>
-              )}
+              {(() => {
+                const heroUrl = getProductHeroUrl(viewProduct)
+                return heroUrl ? (
+                  <Image
+                    src={heroUrl}
+                    alt={viewProduct.name}
+                    width={720}
+                    height={320}
+                    className="h-56 w-full object-cover"
+                    unoptimized
+                  />
+                ) : (
+                  <div className="flex h-56 items-center justify-center text-gray-400">
+                    Aucune image
+                  </div>
+                )
+              })()}
             </div>
             <p><span className="font-medium text-dark">Nom:</span> {viewProduct.name}</p>
             <p><span className="font-medium text-dark">Categorie:</span> {viewProduct.category.name}</p>
@@ -1073,50 +1080,28 @@ export default function ProductsPage() {
               />
             </FormField>
           </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <FormField label="Statut" htmlFor="edit-product-status" error={editProductForm.formState.errors.status?.message}>
-              <select
-                id="edit-product-status"
-                {...editProductForm.register('status')}
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value="published">Publié</option>
-                <option value="draft">Brouillon</option>
-              </select>
-            </FormField>
-            <FormField label="URL image locale" htmlFor="edit-product-image" error={editProductForm.formState.errors.imageUrl?.message}>
-              <input
-                id="edit-product-image"
-                type="url"
-                {...editProductForm.register('imageUrl')}
-                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                placeholder="https://..."
+          <FormField label="Statut" htmlFor="edit-product-status" error={editProductForm.formState.errors.status?.message}>
+            <select
+              id="edit-product-status"
+              {...editProductForm.register('status')}
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="published">Publié</option>
+              <option value="draft">Brouillon</option>
+            </select>
+          </FormField>
+          <div>
+            <p className="mb-2 text-sm font-medium text-gray-700">Images du produit</p>
+            {editingProduct && (
+              <ProductImageManager
+                productId={editingProduct.id}
+                images={editingProduct.images}
+                mainImageRef={editingProduct.mainImageRef}
+                onImagesChange={handleEditImagesChange}
+                onMainImageRefChange={handleEditMainImageRefChange}
+                onError={(msg) => pushToast({ type: 'error', title: 'Erreur image', message: msg })}
               />
-            </FormField>
-          </div>
-          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4">
-            <p className="mb-3 text-sm font-medium text-gray-700">Aperçu image simulé</p>
-            <div className="flex items-center gap-4">
-              <div className="h-24 w-24 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                {editImagePreview?.trim() ? (
-                  <Image
-                    src={editImagePreview.trim()}
-                    alt={editNamePreview || 'Apercu produit'}
-                    width={96}
-                    height={96}
-                    className="h-full w-full object-cover"
-                    unoptimized
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
-                    Preview
-                  </div>
-                )}
-              </div>
-              <div className="text-xs text-gray-500">
-                Cette URL simule un upload local. Le backend remplacera ce comportement plus tard.
-              </div>
-            </div>
+            )}
           </div>
           <FormActions className="pt-2">
             <button
@@ -1212,39 +1197,9 @@ export default function ProductsPage() {
               />
             </FormField>
           </div>
-          <FormField label="URL image locale" htmlFor="add-product-image" error={addProductForm.formState.errors.imageUrl?.message}>
-            <input
-              id="add-product-image"
-              type="url"
-              {...addProductForm.register('imageUrl')}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              placeholder="https://..."
-            />
-          </FormField>
-          <div className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4">
-            <p className="mb-3 text-sm font-medium text-gray-700">Aperçu image simulé</p>
-            <div className="flex items-center gap-4">
-              <div className="h-24 w-24 overflow-hidden rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-                {addImagePreview?.trim() ? (
-                  <Image
-                    src={addImagePreview.trim()}
-                    alt={addNamePreview || 'Apercu nouveau produit'}
-                    width={96}
-                    height={96}
-                    className="h-full w-full object-cover"
-                    unoptimized
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
-                    Preview
-                  </div>
-                )}
-              </div>
-              <div className="text-xs text-gray-500">
-                Cette URL simule un upload local. Le backend remplacera ce comportement plus tard.
-              </div>
-            </div>
-          </div>
+          <p className="text-xs text-gray-500">
+            Les images peuvent etre ajoutees apres la creation du produit via le bouton Modifier.
+          </p>
           <FormActions className="pt-4">
             <button
               type="button"

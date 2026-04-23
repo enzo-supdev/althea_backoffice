@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
 import { Download, Mail, Edit, Trash2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
@@ -18,6 +18,15 @@ import FormField from '@/components/ui/form/FormField'
 import { Invoice } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { ApiError, invoicesApi } from '@/lib/api'
+import type { AdminCreditNote } from '@/lib/api/invoicesApi'
+import ExportButton from '@/components/ui/ExportButton'
+
+const SERVER_SORT_FIELDS = new Set(['invoiceNumber', 'createdAt', 'amount', 'status'])
+
+function mapStatusToApi(status: string): string | undefined {
+  if (status === 'all') return undefined
+  return status.toUpperCase()
+}
 
 const editInvoiceSchema = z.object({
   invoiceNumber: z.string().trim().min(1, 'Le numero de facture est requis.'),
@@ -26,7 +35,7 @@ const editInvoiceSchema = z.object({
     (value) => !Number.isNaN(new Date(value).getTime()),
     'Date d\'emission invalide.',
   ),
-  status: z.enum(['paid', 'pending', 'cancelled']),
+  status: z.enum(['paid', 'pending', 'cancelled', 'refunded']),
 })
 
 type EditInvoiceFormValues = z.infer<typeof editInvoiceSchema>
@@ -42,42 +51,17 @@ interface CreditNote {
   createdAt: Date
 }
 
-const CREDIT_NOTES_STORAGE_KEY = 'althea.ui.credit-notes'
-
-function loadCreditNotes(): CreditNote[] {
-  if (typeof window === 'undefined') return []
-
-  const raw = window.localStorage.getItem(CREDIT_NOTES_STORAGE_KEY)
-  if (!raw) return []
-
-  try {
-    const parsed = JSON.parse(raw) as Array<Omit<CreditNote, 'createdAt'> & { createdAt: string }>
-    return parsed.map((creditNote) => ({
-      ...creditNote,
-      createdAt: new Date(creditNote.createdAt),
-    }))
-  } catch {
-    return []
+function mapApiCreditNote(raw: AdminCreditNote): CreditNote {
+  return {
+    id: raw.id,
+    sourceInvoiceId: raw.invoice?.id ?? '',
+    creditNumber: raw.number ?? '',
+    invoiceNumber: raw.invoice?.number ?? '',
+    customerFullName: '',
+    amount: typeof raw.amount === 'string' ? Number(raw.amount) : raw.amount,
+    reason: raw.notes ?? raw.reason ?? '',
+    createdAt: raw.issuedAt ? new Date(raw.issuedAt) : new Date(),
   }
-}
-
-function saveCreditNotes(creditNotes: CreditNote[]): void {
-  window.localStorage.setItem(
-    CREDIT_NOTES_STORAGE_KEY,
-    JSON.stringify(
-      creditNotes.map((creditNote) => ({
-        ...creditNote,
-        createdAt: creditNote.createdAt.toISOString(),
-      }))
-    )
-  )
-}
-
-type PdfItemRow = {
-  description: string
-  quantity: number
-  unitPrice: number
-  total: number
 }
 
 type PdfImage = {
@@ -88,8 +72,8 @@ type PdfImage = {
 
 const LOGO_SRC = typeof psltLogo === 'string' ? psltLogo : psltLogo.src
 
-function normalizePdfText(value: string): string {
-  return value
+function normalizePdfText(value: string | null | undefined): string {
+  return String(value ?? '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/€/g, 'EUR')
@@ -162,29 +146,8 @@ function pdfRect(x: number, y: number, width: number, height: number, options: {
   return parts.join('\n')
 }
 
-function pdfLine(x1: number, y1: number, x2: number, y2: number, color: [number, number, number] = [0.86, 0.87, 0.9], lineWidth = 1): string {
-  const [r, g, b] = color
-  return [
-    `${lineWidth} w`,
-    `${r} ${g} ${b} RG`,
-    `${x1} ${y1} m ${x2} ${y2} l S`,
-  ].join('\n')
-}
-
 function pdfImage(x: number, y: number, width: number, height: number): string {
   return ['q', `${width} 0 0 ${height} ${x} ${y} cm`, '/Im1 Do', 'Q'].join('\n')
-}
-
-function getInvoiceStatusLabel(status: Invoice['status']): string {
-  if (status === 'paid') return 'Payee'
-  if (status === 'pending') return 'En attente'
-  return 'Annulee'
-}
-
-function getInvoiceStatusColor(status: Invoice['status']): [number, number, number] {
-  if (status === 'paid') return [0.17, 0.53, 0.31]
-  if (status === 'pending') return [0.78, 0.53, 0.08]
-  return [0.72, 0.23, 0.22]
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -278,117 +241,6 @@ async function loadLogoImage(): Promise<PdfImage | null> {
   }
 }
 
-async function buildInvoicePdf(invoice: Invoice): Promise<Blob> {
-  const width = 595.28
-  const pageHeight = 841.89
-  const statusColor = getInvoiceStatusColor(invoice.status)
-  const statusLabel = getInvoiceStatusLabel(invoice.status)
-  const itemRows: PdfItemRow[] = invoice.order.items.map((item) => ({
-    description: truncatePdfText(item.product.name, 42),
-    quantity: item.quantity,
-    unitPrice: item.price,
-    total: item.quantity * item.price,
-  }))
-  const subtotal = itemRows.reduce((sum, item) => sum + item.total, 0)
-  const logo = await loadLogoImage()
-  const content: string[] = []
-
-  content.push(pdfRect(0, 760, width, 82, { fill: [0.11, 0.17, 0.29] }))
-  content.push(pdfRect(0, 752, width, 8, { fill: [0.76, 0.59, 0.21] }))
-  content.push(pdfRect(36, 772, 176, 44, { fill: [1, 1, 1], stroke: [0.82, 0.84, 0.88], lineWidth: 0.8 }))
-  if (logo) {
-    content.push(pdfImage(44, 776, 148, 30))
-  } else {
-    content.push(pdfRect(44, 781, 24, 24, { fill: [0.18, 0.27, 0.43] }))
-    content.push(pdfText(48, 798, 'AS', { size: 10, font: 'F2', color: [1, 1, 1] }))
-  }
-  content.push(pdfRect(447, 780, 112, 32, { fill: statusColor }))
-  content.push(pdfText(471, 800, 'STATUT', { size: 7.5, font: 'F2', color: [1, 1, 1] }))
-  content.push(pdfText(471, 786, statusLabel, { size: 10.5, font: 'F2', color: [1, 1, 1] }))
-  content.push(pdfText(444, 770, invoice.invoiceNumber, { size: 11.5, font: 'F2', color: [0.11, 0.17, 0.29] }))
-
-  content.push(pdfRect(36, 620, 246, 106, { fill: [0.97, 0.98, 0.99], stroke: [0.82, 0.84, 0.88], lineWidth: 0.8 }))
-  content.push(pdfRect(312, 620, 246, 106, { fill: [0.97, 0.98, 0.99], stroke: [0.82, 0.84, 0.88], lineWidth: 0.8 }))
-  content.push(pdfText(50, 708, 'CLIENT', { size: 9, font: 'F2', color: [0.11, 0.17, 0.29] }))
-  content.push(pdfText(326, 708, 'DOCUMENT', { size: 9, font: 'F2', color: [0.11, 0.17, 0.29] }))
-  content.push(pdfText(50, 686, invoice.customer.fullName, { size: 12, font: 'F2' }))
-  content.push(pdfText(50, 670, invoice.customer.email, { size: 8.8, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(50, 655, `Commande: ${invoice.order.orderNumber}`, { size: 8.8, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(50, 640, `Paiement: ${invoice.order.paymentMethod}`, { size: 8.8, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(326, 686, `Numero: ${invoice.invoiceNumber}`, { size: 12, font: 'F2' }))
-  content.push(pdfText(326, 670, `Etat: ${statusLabel}`, { size: 8.8, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(326, 655, `Mode: ${invoice.order.paymentStatus}`, { size: 8.8, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(326, 640, `Emission: ${formatDate(invoice.createdAt)}`, { size: 8.8, color: [0.32, 0.35, 0.4] }))
-
-  content.push(pdfText(36, 592, 'ADRESSES', { size: 9, font: 'F2', color: [0.11, 0.17, 0.29] }))
-  const billingAddress = invoice.order.billingAddress
-  const shippingAddress = invoice.order.shippingAddress
-  const addressLeft = [
-    'Facturation',
-    billingAddress ? `${billingAddress.address1}${billingAddress.address2 ? ` ${billingAddress.address2}` : ''}` : 'Adresse non renseignee',
-    billingAddress ? `${billingAddress.postalCode} ${billingAddress.city}` : '',
-    billingAddress ? `${billingAddress.region}, ${billingAddress.country}` : '',
-  ].filter(Boolean)
-  const addressRight = [
-    'Livraison',
-    shippingAddress ? `${shippingAddress.address1}${shippingAddress.address2 ? ` ${shippingAddress.address2}` : ''}` : 'Adresse non renseignee',
-    shippingAddress ? `${shippingAddress.postalCode} ${shippingAddress.city}` : '',
-    shippingAddress ? `${shippingAddress.region}, ${shippingAddress.country}` : '',
-  ].filter(Boolean)
-  addressLeft.forEach((line, index) => {
-    content.push(pdfText(40, 574 - index * 13, line, { size: 8.5, color: [0.32, 0.35, 0.4] }))
-  })
-  addressRight.forEach((line, index) => {
-    content.push(pdfText(320, 574 - index * 13, line, { size: 8.5, color: [0.32, 0.35, 0.4] }))
-  })
-
-  content.push(pdfRect(36, 388, 528, 170, { fill: [1, 1, 1], stroke: [0.82, 0.84, 0.88], lineWidth: 0.8 }))
-  content.push(pdfRect(36, 531, 528, 27, { fill: [0.11, 0.17, 0.29] }))
-  content.push(pdfText(52, 539, 'Designation', { size: 9, font: 'F2', color: [1, 1, 1] }))
-  content.push(pdfText(318, 539, 'Qté', { size: 9, font: 'F2', color: [1, 1, 1] }))
-  content.push(pdfText(380, 539, 'PU', { size: 9, font: 'F2', color: [1, 1, 1] }))
-  content.push(pdfText(471, 539, 'Total', { size: 9, font: 'F2', color: [1, 1, 1] }))
-
-  itemRows.forEach((item, index) => {
-    const rowTop = 505 - index * 24
-    const isStriped = index % 2 === 1
-    if (isStriped) {
-      content.push(pdfRect(36, rowTop - 4, 528, 20, { fill: [0.98, 0.99, 1] }))
-    }
-    content.push(pdfLine(36, rowTop + 11, 564, rowTop + 11, [0.9, 0.91, 0.94], 0.6))
-    content.push(pdfText(52, rowTop, item.description, { size: 9 }))
-    content.push(pdfText(318, rowTop, String(item.quantity), { size: 9 }))
-    content.push(pdfText(376, rowTop, formatPdfCurrency(item.unitPrice), { size: 9 }))
-    content.push(pdfText(456, rowTop, formatPdfCurrency(item.total), { size: 9, font: 'F2' }))
-  })
-
-  content.push(pdfRect(344, 244, 220, 112, { fill: [0.97, 0.98, 0.99], stroke: [0.82, 0.84, 0.88], lineWidth: 0.8 }))
-  content.push(pdfText(360, 336, 'SYNTHESE', { size: 9, font: 'F2', color: [0.11, 0.17, 0.29] }))
-  content.push(pdfText(360, 312, 'Sous-total', { size: 9, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(485, 312, formatPdfCurrency(subtotal), { size: 10, font: 'F2', color: [0.11, 0.17, 0.29] }))
-  content.push(pdfText(360, 294, 'Montant total', { size: 9, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(485, 294, formatPdfCurrency(invoice.amount), { size: 15, font: 'F2', color: [0.11, 0.17, 0.29] }))
-  content.push(pdfText(360, 276, 'Etat paiement', { size: 9, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(485, 276, invoice.order.paymentStatus, { size: 9, font: 'F2' }))
-  content.push(pdfText(360, 258, 'Lignes', { size: 9, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(485, 258, String(itemRows.length), { size: 9, font: 'F2' }))
-
-  content.push(pdfRect(36, 244, 292, 112, { fill: [1, 1, 1], stroke: [0.82, 0.84, 0.88], lineWidth: 0.8 }))
-  content.push(pdfText(50, 336, 'NOTES', { size: 9, font: 'F2', color: [0.11, 0.17, 0.29] }))
-  content.push(pdfText(50, 313, 'Paiement conforme aux conditions commerciales standard.', { size: 9, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(50, 297, 'Echeance et relances gerees dans le module facturation.', { size: 9, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(50, 281, 'Document genere localement pour previsualisation front.', { size: 9, color: [0.32, 0.35, 0.4] }))
-  content.push(pdfText(50, 265, 'Version PDF de simulation en attente du moteur backend.', { size: 9, color: [0.32, 0.35, 0.4] }))
-
-  content.push(pdfRect(36, 205, 528, 1.2, { fill: [0.82, 0.84, 0.88] }))
-  content.push(pdfText(40, 186, 'ALTHEA Systems - BackOffice. Document genere automatiquement.', { size: 8.3, color: [0.45, 0.48, 0.54] }))
-  content.push(pdfText(486, 186, 'Page 1 / 1', { size: 8.3, color: [0.45, 0.48, 0.54] }))
-  content.push(pdfText(40, 170, `Reference interne: ${invoice.invoiceNumber} | Client: ${invoice.customer.fullName}`, { size: 8.3, color: [0.45, 0.48, 0.54] }))
-  content.push(pdfText(40, 154, `Emission: ${formatDate(invoice.createdAt)} | Statut: ${statusLabel}`, { size: 8.3, color: [0.45, 0.48, 0.54] }))
-
-  return buildPdfDocument(content.join('\n'), logo)
-}
-
 async function buildCreditNotePdf(creditNote: CreditNote): Promise<Blob> {
   const width = 595.28
   const logo = await loadLogoImage()
@@ -441,11 +293,221 @@ function triggerDownload(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url)
 }
 
+function formatDateMaybe(value: string | Date | null | undefined): string {
+  if (!value) return '-'
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return formatDate(date)
+}
+
+function InvoicePreviewContent({
+  invoice,
+  pdfUrl,
+  detailLoading,
+  onClose,
+  onDownload,
+}: {
+  invoice: Invoice
+  pdfUrl: string
+  detailLoading: boolean
+  onClose: () => void
+  onDownload: () => void
+}) {
+  const statusLabel =
+    invoice.status === 'paid'
+      ? 'Payee'
+      : invoice.status === 'pending'
+        ? 'En attente'
+        : invoice.status === 'refunded'
+          ? 'Remboursee'
+          : 'Annulee'
+
+  const statusClass =
+    invoice.status === 'paid'
+      ? 'bg-green-100 text-green-800'
+      : invoice.status === 'pending'
+        ? 'bg-orange-100 text-orange-800'
+        : invoice.status === 'refunded'
+          ? 'bg-gray-200 text-gray-800'
+          : 'bg-red-100 text-red-800'
+
+  const customerName =
+    invoice.customerSnapshot
+      ? [invoice.customerSnapshot.firstName, invoice.customerSnapshot.lastName].filter(Boolean).join(' ').trim() ||
+        invoice.customer.fullName
+      : invoice.customer.fullName
+  const customerEmail = invoice.customerSnapshot?.email ?? invoice.customer.email
+
+  const billing = invoice.billingAddressSnapshot ?? invoice.order.billingAddress ?? null
+
+  const items = (invoice.items && invoice.items.length > 0 ? invoice.items : invoice.order.items) as Invoice['items']
+
+  const subtotalHt = typeof invoice.subtotalHt === 'number' ? invoice.subtotalHt : null
+  const totalVat = typeof invoice.totalVat === 'number' ? invoice.totalVat : null
+  const totalTtc =
+    typeof invoice.totalTtc === 'number' && invoice.totalTtc > 0 ? invoice.totalTtc : invoice.amount
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 text-sm text-gray-700">
+        <div className="space-y-1">
+          <p><span className="font-medium text-dark">Numero :</span> {invoice.invoiceNumber}</p>
+          <p><span className="font-medium text-dark">Emission :</span> {formatDateMaybe(invoice.issuedAt ?? invoice.createdAt)}</p>
+          {invoice.paidAt && (
+            <p><span className="font-medium text-dark">Paiement :</span> {formatDateMaybe(invoice.paidAt)}</p>
+          )}
+          {invoice.cancelledAt && (
+            <p><span className="font-medium text-dark">Annulation :</span> {formatDateMaybe(invoice.cancelledAt)}</p>
+          )}
+          <p><span className="font-medium text-dark">Commande :</span> {invoice.order.orderNumber}</p>
+        </div>
+        <div className="space-y-1 text-right">
+          <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${statusClass}`}>
+            {statusLabel}
+          </span>
+          <p className="text-lg font-semibold text-dark">{formatCurrency(totalTtc)}</p>
+          <p className="text-xs text-gray-500">Total TTC</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Facturer a</h3>
+          <p className="mt-2 font-medium text-dark">{customerName}</p>
+          <p className="text-sm text-gray-600">{customerEmail}</p>
+          {billing ? (
+            <address className="mt-2 not-italic text-sm text-gray-600">
+              {billing.address1}
+              {billing.address2 ? (
+                <>
+                  <br />
+                  {billing.address2}
+                </>
+              ) : null}
+              <br />
+              {billing.postalCode} {billing.city}
+              <br />
+              {billing.country}
+              {billing.phone ? (
+                <>
+                  <br />
+                  Tel : {billing.phone}
+                </>
+              ) : null}
+            </address>
+          ) : (
+            <p className="mt-2 text-sm text-gray-500">Adresse de facturation non renseignee.</p>
+          )}
+        </div>
+
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Synthese</h3>
+          <dl className="mt-2 space-y-1 text-sm text-gray-700">
+            {subtotalHt !== null && (
+              <div className="flex justify-between">
+                <dt>Sous-total HT</dt>
+                <dd className="font-medium text-dark">{formatCurrency(subtotalHt)}</dd>
+              </div>
+            )}
+            {totalVat !== null && (
+              <div className="flex justify-between">
+                <dt>TVA</dt>
+                <dd className="font-medium text-dark">{formatCurrency(totalVat)}</dd>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-gray-200 pt-2 text-base">
+              <dt className="font-semibold text-dark">Total TTC</dt>
+              <dd className="font-semibold text-dark">{formatCurrency(totalTtc)}</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200">
+        <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <span>Articles</span>
+          {detailLoading ? <span className="text-gray-400">Chargement...</span> : null}
+        </div>
+        {items && items.length > 0 ? (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-gray-500">
+                <th className="px-4 py-2">Designation</th>
+                <th className="px-4 py-2">Qte</th>
+                <th className="px-4 py-2">PU HT</th>
+                <th className="px-4 py-2">TVA</th>
+                <th className="px-4 py-2">PU TTC</th>
+                <th className="px-4 py-2 text-right">Total TTC</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const unitHt = typeof item.priceHt === 'number' ? item.priceHt : null
+                const unitTtc = typeof item.priceTtc === 'number' ? item.priceTtc : item.price
+                const rate = typeof item.vatRate === 'number' ? item.vatRate : null
+                return (
+                  <tr key={item.id} className="border-t border-gray-100">
+                    <td className="px-4 py-2 text-dark">{item.productName ?? item.product.name}</td>
+                    <td className="px-4 py-2">{item.quantity}</td>
+                    <td className="px-4 py-2">{unitHt !== null ? formatCurrency(unitHt) : '-'}</td>
+                    <td className="px-4 py-2">{rate !== null ? `${Math.round(rate * 100)}%` : '-'}</td>
+                    <td className="px-4 py-2">{formatCurrency(unitTtc)}</td>
+                    <td className="px-4 py-2 text-right font-medium text-dark">
+                      {formatCurrency(unitTtc * item.quantity)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div className="px-4 py-6 text-center text-sm text-gray-500">
+            {detailLoading ? 'Chargement des lignes...' : 'Aucun article lie a cette facture.'}
+          </div>
+        )}
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm">
+        {pdfUrl ? (
+          <iframe
+            title={`Apercu PDF ${invoice.invoiceNumber}`}
+            src={pdfUrl}
+            className="h-[60vh] w-full bg-white"
+          />
+        ) : (
+          <div className="flex h-[60vh] items-center justify-center text-sm text-gray-500">
+            Chargement de l&apos;apercu PDF...
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={onDownload}
+          className="btn-primary"
+        >
+          Telecharger PDF
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100"
+        >
+          Fermer
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
+  const [totalItems, setTotalItems] = useState(0)
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [searchInput, setSearchInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<'invoices' | 'credits'>('invoices')
   const [filterStatus, setFilterStatus] = useState('all')
@@ -455,8 +517,12 @@ export default function InvoicesPage() {
   const [pageSize, setPageSize] = useState(25)
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null)
   const [previewPdfUrl, setPreviewPdfUrl] = useState('')
+  const [previewDetailLoading, setPreviewDetailLoading] = useState(false)
   const [invoiceToEdit, setInvoiceToEdit] = useState<Invoice | null>(null)
   const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null)
+  const [creditNotesPage, setCreditNotesPage] = useState(1)
+  const [creditNotesTotal, setCreditNotesTotal] = useState(0)
+  const [creditNotesLoading, setCreditNotesLoading] = useState(false)
   const { pushToast } = useToast()
 
   const editInvoiceForm = useForm<EditInvoiceFormValues>({
@@ -469,42 +535,83 @@ export default function InvoicesPage() {
     },
   })
 
+  const pushToastRef = useRef(pushToast)
   useEffect(() => {
-    let isMounted = true
-
-    const loadInvoices = async () => {
-      setLoadError('')
-      setIsLoading(true)
-
-      try {
-        const loadedInvoices = await invoicesApi.list()
-        if (!isMounted) return
-        setInvoices(loadedInvoices)
-      } catch (error) {
-        if (!isMounted) return
-        setLoadError('La facturation est indisponible.')
-        pushToast({
-          type: 'error',
-          title: 'Chargement factures impossible',
-          message: error instanceof ApiError ? error.message : 'Les donnees locales ont ete ignorees.',
-        })
-      } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
-      }
-    }
-
-    void loadInvoices()
-
-    if (typeof window !== 'undefined') {
-      setCreditNotes(loadCreditNotes())
-    }
-
-    return () => {
-      isMounted = false
-    }
+    pushToastRef.current = pushToast
   }, [pushToast])
+
+  const loadInvoices = useCallback(async () => {
+    setLoadError('')
+    setIsLoading(true)
+
+    const params: Parameters<typeof invoicesApi.list>[0] = {
+      page: currentPage,
+      limit: pageSize,
+      search: searchQuery || undefined,
+      status: mapStatusToApi(filterStatus),
+      sortBy: SERVER_SORT_FIELDS.has(sortKey) ? sortKey : undefined,
+      order: sortDirection,
+    }
+
+    try {
+      const result = await invoicesApi.list(params)
+      setInvoices(result.data)
+      setTotalItems(result.meta?.total ?? result.data.length)
+    } catch (error) {
+      setInvoices([])
+      setTotalItems(0)
+      setLoadError(
+        error instanceof ApiError
+          ? error.message
+          : 'Impossible de récupérer les factures (voir la console pour le détail serveur).',
+      )
+      pushToastRef.current({
+        type: 'error',
+        title: 'Chargement factures impossible',
+        message: error instanceof ApiError ? error.message : 'Le serveur a renvoyé une erreur (voir console).',
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [currentPage, pageSize, searchQuery, filterStatus, sortKey, sortDirection])
+
+  useEffect(() => {
+    void loadInvoices()
+  }, [loadInvoices])
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setSearchQuery(searchInput.trim())
+      setCurrentPage(1)
+    }, 350)
+    return () => clearTimeout(timeout)
+  }, [searchInput])
+
+  const loadCreditNotesFromApi = useCallback(async () => {
+    setCreditNotesLoading(true)
+    try {
+      const res = await invoicesApi.listCreditNotes({
+        page: creditNotesPage,
+        limit: pageSize,
+      })
+      setCreditNotes(res.creditNotes.map(mapApiCreditNote))
+      setCreditNotesTotal(res.pagination.total ?? res.creditNotes.length)
+    } catch (error) {
+      setCreditNotes([])
+      setCreditNotesTotal(0)
+      pushToastRef.current({
+        type: 'error',
+        title: 'Chargement avoirs impossible',
+        message: error instanceof ApiError ? error.message : 'Le serveur a renvoyé une erreur (voir console).',
+      })
+    } finally {
+      setCreditNotesLoading(false)
+    }
+  }, [creditNotesPage, pageSize])
+
+  useEffect(() => {
+    void loadCreditNotesFromApi()
+  }, [loadCreditNotesFromApi])
 
   useEffect(() => {
     return () => {
@@ -521,74 +628,38 @@ export default function InvoicesPage() {
 
     setPreviewPdfUrl('')
     setPreviewInvoice(null)
-  }
-
-  const persistInvoices = async (nextInvoices: Invoice[]) => {
-    setInvoices(nextInvoices)
-
-    try {
-      await invoicesApi.save(nextInvoices)
-    } catch (error) {
-      pushToast({
-        type: 'error',
-        title: 'Sauvegarde impossible',
-        message: error instanceof ApiError ? error.message : 'La synchronisation locale a echoue.',
-      })
-    }
+    setPreviewDetailLoading(false)
   }
 
   const retryLoadInvoices = () => {
-    setLoadError('')
-    setIsLoading(true)
-
-    void invoicesApi.list()
-      .then((loadedInvoices) => {
-        setInvoices(loadedInvoices)
-      })
-      .catch((error) => {
-        setLoadError('La facturation est indisponible.')
-        pushToast({
-          type: 'error',
-          title: 'Rechargement impossible',
-          message: error instanceof ApiError ? error.message : 'La tentative de rechargement a echoue.',
-        })
-      })
-      .finally(() => {
-        setIsLoading(false)
-      })
+    void loadInvoices()
   }
 
-  const persistCreditNotes = (nextCreditNotes: CreditNote[]) => {
-    setCreditNotes(nextCreditNotes)
-
+  const createCreditNoteForInvoice = async (
+    invoice: Invoice,
+    reason: 'cancellation' | 'refund' | 'error',
+    notes: string,
+  ): Promise<boolean> => {
     try {
-      saveCreditNotes(nextCreditNotes)
+      await invoicesApi.createCreditNote(invoice.id, {
+        amount: invoice.amount,
+        reason,
+        notes,
+        sendEmail: false,
+      })
+      await loadCreditNotesFromApi()
+      return true
     } catch (error) {
       pushToast({
         type: 'error',
-        title: 'Sauvegarde avoirs impossible',
-        message: error instanceof ApiError ? error.message : 'La synchronisation locale a echoue.',
+        title: 'Avoir non créé',
+        message:
+          error instanceof ApiError
+            ? error.message
+            : 'La création de l\'avoir côté serveur a échoué.',
       })
+      return false
     }
-  }
-
-  const createCreditNoteFromInvoice = (invoice: Invoice, reason: string) => {
-    if (creditNotes.some((creditNote) => creditNote.sourceInvoiceId === invoice.id)) {
-      return
-    }
-
-    const nextCreditNote: CreditNote = {
-      id: `cn-${Date.now()}`,
-      sourceInvoiceId: invoice.id,
-      creditNumber: `AV-${invoice.invoiceNumber.replace(/^FACT-/, '')}`,
-      invoiceNumber: invoice.invoiceNumber,
-      customerFullName: invoice.customer.fullName,
-      amount: invoice.amount,
-      reason,
-      createdAt: new Date(),
-    }
-
-    persistCreditNotes([nextCreditNote, ...creditNotes])
   }
 
   const openEditInvoice = (invoice: Invoice) => {
@@ -601,96 +672,109 @@ export default function InvoicesPage() {
     })
   }
 
-  const updateInvoiceStatus = async (invoiceId: string, nextStatus: Invoice['status']) => {
-    const nextInvoices: Invoice[] = invoices.map((invoice) =>
-      invoice.id === invoiceId
-        ? { ...invoice, status: nextStatus }
-        : invoice
-    )
-
-    const previousInvoice = invoices.find((invoice) => invoice.id === invoiceId)
-
-    await persistInvoices(nextInvoices)
-
-    if (previousInvoice && nextStatus === 'cancelled' && previousInvoice.status !== 'cancelled') {
-      createCreditNoteFromInvoice(previousInvoice, 'Annulation simulée de facture')
-    }
-
-    pushToast({
-      type: 'success',
-      title: 'Statut facture mis a jour',
-      message: `La facture est maintenant ${nextStatus === 'paid' ? 'payee' : nextStatus === 'pending' ? 'en attente' : 'annulee'}.`,
-    })
-  }
-
   const handleSaveInvoiceMetadata = editInvoiceForm.handleSubmit(async (values) => {
     if (!invoiceToEdit) return
 
-    const createdAt = new Date(values.createdAt)
-
-    const nextInvoices: Invoice[] = invoices.map((invoice) =>
-      invoice.id === invoiceToEdit.id
-        ? {
-            ...invoice,
-            invoiceNumber: values.invoiceNumber.trim(),
-            amount: values.amount,
-            createdAt,
-            status: values.status,
-          }
-        : invoice
-    )
-
-    await persistInvoices(nextInvoices)
-
     if (values.status === 'cancelled' && invoiceToEdit.status !== 'cancelled') {
-      createCreditNoteFromInvoice(invoiceToEdit, 'Facture annulee depuis la fiche metadonnees')
+      const ok = await createCreditNoteForInvoice(
+        invoiceToEdit,
+        'cancellation',
+        'Facture annulée depuis la fiche métadonnées',
+      )
+      if (!ok) return
+      await loadInvoices()
+      pushToast({
+        type: 'success',
+        title: 'Avoir créé',
+        message: 'Un avoir a été émis côté serveur.',
+      })
+    } else {
+      pushToast({
+        type: 'info',
+        title: 'Aucune action serveur',
+        message: 'Les métadonnées de facture ne sont pas modifiables via l\'API actuelle.',
+      })
     }
 
     setInvoiceToEdit(null)
     editInvoiceForm.reset()
-
-    pushToast({
-      type: 'success',
-      title: 'Facture mise a jour',
-      message: 'Les metadonnees ont ete enregistrees localement.',
-    })
   })
 
   const removeInvoice = async () => {
     if (!invoiceToDelete) return
-    createCreditNoteFromInvoice(invoiceToDelete, 'Suppression simulée de facture')
-    const nextInvoices: Invoice[] = invoices.filter((invoice) => invoice.id !== invoiceToDelete.id)
-    await persistInvoices(nextInvoices)
+    const ok = await createCreditNoteForInvoice(
+      invoiceToDelete,
+      'cancellation',
+      'Annulation depuis le back-office',
+    )
     setInvoiceToDelete(null)
-    pushToast({
-      type: 'success',
-      title: 'Facture supprimee',
-      message: 'Un avoir pourra etre genere ulterieurement en backend.',
-    })
+    if (ok) {
+      await loadInvoices()
+      pushToast({
+        type: 'success',
+        title: 'Avoir émis',
+        message: 'Un avoir a été créé pour cette facture.',
+      })
+    }
   }
 
   const handleSimulatedPdfDownload = async (invoice: Invoice) => {
-    const pdf = await buildInvoicePdf(invoice)
-
-    triggerDownload(pdf, `${invoice.invoiceNumber.toLowerCase()}-simulation.pdf`)
-
-    pushToast({
-      type: 'info',
-      title: 'Export simule effectue',
-      message: `Fichier de previsualisation exporte pour ${invoice.invoiceNumber}.`,
-    })
+    try {
+      const pdf = await invoicesApi.downloadPdf(invoice.id)
+      triggerDownload(pdf, `${invoice.invoiceNumber.toLowerCase()}.pdf`)
+      pushToast({
+        type: 'success',
+        title: 'Facture telechargee',
+        message: `${invoice.invoiceNumber} exportee depuis le serveur.`,
+      })
+    } catch (error) {
+      console.error('[invoices] Téléchargement PDF serveur échoué :', error)
+      pushToast({
+        type: 'error',
+        title: 'Téléchargement impossible',
+        message:
+          error instanceof ApiError || error instanceof Error
+            ? error.message
+            : 'Le serveur n\'a pas renvoyé de PDF pour cette facture.',
+      })
+    }
   }
 
   const openInvoicePreview = async (invoice: Invoice) => {
-    const pdf = await buildInvoicePdf(invoice)
-    const pdfUrl = URL.createObjectURL(pdf)
-
     if (previewPdfUrl) {
       URL.revokeObjectURL(previewPdfUrl)
+      setPreviewPdfUrl('')
     }
 
+    // Affiche la modale immédiatement avec les infos de la liste, puis enrichit
+    // avec le détail complet (items, snapshots, HT/TVA/TTC) dès que possible.
     setPreviewInvoice(invoice)
-    setPreviewPdfUrl(pdfUrl)
+    setPreviewDetailLoading(true)
+
+    try {
+      const detail = await invoicesApi.getById(invoice.id)
+      setPreviewInvoice(detail as unknown as Invoice)
+    } catch (error) {
+      console.warn('[invoices] Détail facture indisponible, repli sur la liste :', error)
+    } finally {
+      setPreviewDetailLoading(false)
+    }
+
+    try {
+      const pdfBlob = await invoicesApi.downloadPdf(invoice.id)
+      const pdfUrl = URL.createObjectURL(pdfBlob)
+      setPreviewPdfUrl(pdfUrl)
+    } catch (error) {
+      console.error('[invoices] Aperçu PDF serveur échoué :', error)
+      pushToast({
+        type: 'error',
+        title: 'Aperçu PDF indisponible',
+        message:
+          error instanceof ApiError || error instanceof Error
+            ? error.message
+            : 'Le serveur n\'a pas renvoyé le PDF de la facture.',
+      })
+    }
   }
 
   const handleCreditNoteDownload = async (creditNote: CreditNote) => {
@@ -705,59 +789,10 @@ export default function InvoicesPage() {
     })
   }
 
-  const filteredInvoices = useMemo(() => {
-    const query = searchQuery.toLowerCase().trim()
-
-    const filtered = invoices.filter((invoice) => {
-      const matchesQuery =
-        !query ||
-        invoice.invoiceNumber.toLowerCase().includes(query) ||
-        invoice.customer.fullName.toLowerCase().includes(query) ||
-        invoice.customer.email.toLowerCase().includes(query) ||
-        invoice.order.orderNumber.toLowerCase().includes(query)
-
-      const matchesStatus = filterStatus === 'all' || invoice.status === filterStatus
-
-      return matchesQuery && matchesStatus
-    })
-
-    filtered.sort((a, b) => {
-      let aValue: string | number = ''
-      let bValue: string | number = ''
-
-      if (sortKey === 'customer') {
-        aValue = a.customer.fullName
-        bValue = b.customer.fullName
-      } else if (sortKey === 'createdAt') {
-        aValue = a.createdAt.getTime()
-        bValue = b.createdAt.getTime()
-      } else {
-        aValue = (a as any)[sortKey] ?? ''
-        bValue = (b as any)[sortKey] ?? ''
-      }
-
-      if (typeof aValue === 'string' && typeof bValue === 'string') {
-        return sortDirection === 'asc'
-          ? aValue.localeCompare(bValue)
-          : bValue.localeCompare(aValue)
-      }
-
-      return sortDirection === 'asc'
-        ? Number(aValue) - Number(bValue)
-        : Number(bValue) - Number(aValue)
-    })
-
-    return filtered
-  }, [invoices, searchQuery, filterStatus, sortKey, sortDirection])
-
-  const paginatedInvoices = useMemo(() => {
-    const start = (currentPage - 1) * pageSize
-    return filteredInvoices.slice(start, start + pageSize)
-  }, [filteredInvoices, currentPage, pageSize])
-
-  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize))
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize))
 
   const handleSort = (key: string) => {
+    setCurrentPage(1)
     if (sortKey === key) {
       setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'))
       return
@@ -828,12 +863,15 @@ export default function InvoicesPage() {
               ? 'success'
               : invoice.status === 'pending'
                 ? 'warning'
-                : 'error'
+                : invoice.status === 'refunded'
+                  ? 'default'
+                  : 'error'
           }
         >
           {invoice.status === 'paid' && 'Payee'}
           {invoice.status === 'pending' && 'En attente'}
           {invoice.status === 'cancelled' && 'Annulee'}
+          {invoice.status === 'refunded' && 'Remboursee'}
         </Badge>
       ),
     },
@@ -891,11 +929,25 @@ export default function InvoicesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-heading font-semibold text-dark md:text-3xl">
-          Gestion des Factures
-        </h1>
-        <p className="mt-1 text-gray-600">Gerez les factures et les avoirs</p>
+      <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h1 className="text-2xl font-heading font-semibold text-dark md:text-3xl">
+            Gestion des Factures
+          </h1>
+          <p className="mt-1 text-gray-600">Gerez les factures et les avoirs</p>
+        </div>
+        <div className="flex gap-2">
+          <ExportButton
+            fetcher={() => invoicesApi.exportAdmin({ format: 'csv' })}
+            filename={`factures-${new Date().toISOString().slice(0, 10)}.csv`}
+            label="Exporter CSV"
+          />
+          <ExportButton
+            fetcher={() => invoicesApi.exportAdmin({ format: 'xlsx' })}
+            filename={`factures-${new Date().toISOString().slice(0, 10)}.xlsx`}
+            label="Exporter XLSX"
+          />
+        </div>
       </div>
 
       <div className="border-b border-gray-200">
@@ -909,7 +961,7 @@ export default function InvoicesPage() {
                 : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
             }`}
           >
-            Factures ({invoices.length})
+            Factures ({totalItems})
           </button>
           <button
             type="button"
@@ -920,7 +972,7 @@ export default function InvoicesPage() {
                 : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
             }`}
           >
-            Avoirs ({creditNotes.length})
+            Avoirs ({creditNotesTotal})
           </button>
         </nav>
       </div>
@@ -930,11 +982,8 @@ export default function InvoicesPage() {
           <div className="card space-y-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <SearchBar
-                value={searchQuery}
-                onChange={(value) => {
-                  setSearchQuery(value)
-                  setCurrentPage(1)
-                }}
+                value={searchInput}
+                onChange={setSearchInput}
                 placeholder="Rechercher facture, client, commande..."
                 ariaLabel="Rechercher une facture"
               />
@@ -951,6 +1000,7 @@ export default function InvoicesPage() {
                 <option value="paid">Payee</option>
                 <option value="pending">En attente</option>
                 <option value="cancelled">Annulee</option>
+                <option value="refunded">Remboursee</option>
               </select>
             </div>
           </div>
@@ -971,7 +1021,7 @@ export default function InvoicesPage() {
             <div className="card p-0">
               <DataTable
                 columns={columns}
-                data={paginatedInvoices}
+                data={invoices}
                 onSort={handleSort}
                 sortKey={sortKey}
                 sortDirection={sortDirection}
@@ -982,7 +1032,7 @@ export default function InvoicesPage() {
                 currentPage={currentPage}
                 totalPages={totalPages}
                 pageSize={pageSize}
-                totalItems={filteredInvoices.length}
+                totalItems={totalItems}
                 onPageChange={setCurrentPage}
                 onPageSizeChange={(size) => {
                   setPageSize(size)
@@ -995,45 +1045,17 @@ export default function InvoicesPage() {
           <Modal
             isOpen={!!previewInvoice}
             onClose={closeInvoicePreview}
-            title="Apercu facture (simulation PDF)"
+            title="Apercu facture PDF"
             size="xl"
           >
             {previewInvoice && (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-700">
-                  <div className="space-y-1">
-                    <p><span className="font-medium text-dark">Numero:</span> {previewInvoice.invoiceNumber}</p>
-                    <p><span className="font-medium text-dark">Client:</span> {previewInvoice.customer.fullName}</p>
-                    <p><span className="font-medium text-dark">Commande:</span> {previewInvoice.order.orderNumber}</p>
-                  </div>
-                  <div className="space-y-1 text-right">
-                    <p><span className="font-medium text-dark">Date:</span> {formatDate(previewInvoice.createdAt)}</p>
-                    <p><span className="font-medium text-dark">Montant:</span> {formatCurrency(previewInvoice.amount)}</p>
-                  </div>
-                </div>
-                <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-100 shadow-sm">
-                  {previewPdfUrl ? (
-                    <iframe
-                      title={`Apercu PDF ${previewInvoice.invoiceNumber}`}
-                      src={previewPdfUrl}
-                      className="h-[78vh] w-full bg-white"
-                    />
-                  ) : (
-                    <div className="flex h-[78vh] items-center justify-center text-sm text-gray-500">
-                      Chargement de l&apos;aperçu PDF...
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={closeInvoicePreview}
-                    className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100"
-                  >
-                    Fermer
-                  </button>
-                </div>
-              </div>
+              <InvoicePreviewContent
+                invoice={previewInvoice}
+                pdfUrl={previewPdfUrl}
+                detailLoading={previewDetailLoading}
+                onClose={closeInvoicePreview}
+                onDownload={() => void handleSimulatedPdfDownload(previewInvoice)}
+              />
             )}
           </Modal>
 
@@ -1101,6 +1123,7 @@ export default function InvoicesPage() {
                       <option value="paid">Payee</option>
                       <option value="pending">En attente</option>
                       <option value="cancelled">Annulee</option>
+                      <option value="refunded">Remboursee</option>
                     </select>
                   </FormField>
                 </div>
@@ -1171,11 +1194,15 @@ export default function InvoicesPage() {
                   <p className="text-sm text-gray-500">Crees automatiquement lors d’une annulation ou suppression.</p>
                 </div>
                 <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700">
-                  {creditNotes.length} avoir{creditNotes.length > 1 ? 's' : ''}
+                  {creditNotesTotal} avoir{creditNotesTotal > 1 ? 's' : ''}
                 </span>
               </div>
             </div>
-            {creditNotes.length === 0 ? (
+            {creditNotesLoading ? (
+              <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-500">
+                Chargement des avoirs…
+              </div>
+            ) : creditNotes.length === 0 ? (
               <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-500">
                 Aucun avoir genere pour le moment
               </div>
@@ -1188,9 +1215,12 @@ export default function InvoicesPage() {
                         <span className="font-medium text-gray-900">{creditNote.creditNumber}</span>
                         <Badge variant="default">Avoir</Badge>
                       </div>
-                      <p className="text-sm text-gray-600">Facture source {creditNote.invoiceNumber} - {creditNote.customerFullName}</p>
+                      <p className="text-sm text-gray-600">
+                        Facture source {creditNote.invoiceNumber}
+                        {creditNote.customerFullName ? ` · ${creditNote.customerFullName}` : ''}
+                      </p>
                       <p className="mt-1 text-xs text-gray-500">
-                        {creditNote.reason} · {formatDate(creditNote.createdAt)}
+                        {creditNote.reason || '—'} · {formatDate(creditNote.createdAt)}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -1217,6 +1247,19 @@ export default function InvoicesPage() {
               </div>
             )}
           </div>
+          {creditNotesTotal > pageSize ? (
+            <Pagination
+              currentPage={creditNotesPage}
+              totalPages={Math.max(1, Math.ceil(creditNotesTotal / pageSize))}
+              pageSize={pageSize}
+              totalItems={creditNotesTotal}
+              onPageChange={setCreditNotesPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size)
+                setCreditNotesPage(1)
+              }}
+            />
+          ) : null}
         </div>
       )}
     </div>

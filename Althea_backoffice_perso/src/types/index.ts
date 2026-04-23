@@ -1,5 +1,13 @@
 // Types principaux pour le backoffice Althea Systems
 
+export interface ProductImage {
+  id: string
+  url: string
+  imageRef: string
+  isMain: boolean
+  displayOrder: number
+}
+
 export interface Product {
   id: string
   name: string
@@ -8,9 +16,10 @@ export interface Product {
   priceHT: number
   tva: number
   stock: number
-  status: 'published' | 'draft'
+  status: 'published' | 'draft' | 'archived'
   category: Category
-  images: string[]
+  images: ProductImage[]
+  mainImageRef: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -81,8 +90,32 @@ export interface Invoice {
   order: Order
   customer: User
   amount: number
-  status: 'paid' | 'pending' | 'cancelled'
+  subtotalHt?: number
+  totalVat?: number
+  totalTtc?: number
+  items?: InvoiceItem[]
+  customerSnapshot?: {
+    firstName?: string
+    lastName?: string
+    email?: string
+  } | null
+  billingAddressSnapshot?: Partial<Address> | null
+  issuedAt?: string | Date
+  paidAt?: string | Date | null
+  cancelledAt?: string | Date | null
+  status: 'paid' | 'pending' | 'cancelled' | 'refunded'
   createdAt: Date
+}
+
+export interface InvoiceItem {
+  id: string
+  product: Product
+  quantity: number
+  price: number
+  priceHt?: number
+  vatRate?: number
+  priceTtc?: number
+  productName?: string
 }
 
 export interface Message {

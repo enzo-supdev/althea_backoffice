@@ -1,4 +1,34 @@
+import axios from 'axios'
 import { ApiError, ApiErrorPayload } from './types'
+
+/**
+ * Extrait un message d'erreur lisible depuis une exception (Axios, ApiError, Error, ...).
+ * Privilégie le message renvoyé par le backend dans le corps 4xx/5xx — qui contient
+ * souvent la raison exacte du rejet (validation de champ, ref introuvable, etc.).
+ */
+export function extractErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return error.message || fallback
+  }
+
+  if (axios.isAxiosError(error)) {
+    const body: any = error.response?.data
+    if (body) {
+      if (typeof body === 'string') return body
+      if (typeof body.error?.message === 'string') return body.error.message
+      if (typeof body.message === 'string') return body.message
+      if (body.errors && typeof body.errors === 'object') {
+        const first = Object.values(body.errors)[0]
+        if (typeof first === 'string') return first
+        if (Array.isArray(first) && typeof first[0] === 'string') return first[0]
+      }
+    }
+    if (error.message) return error.message
+  }
+
+  if (error instanceof Error) return error.message || fallback
+  return fallback
+}
 
 export interface StorageEnvelope<T> {
   schemaVersion: number

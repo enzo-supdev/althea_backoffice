@@ -3,29 +3,35 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { analyticsApi } from '@/lib/api'
+import type { SalesTimelinePoint } from '@/lib/api/types'
+import { formatCurrency } from '@/lib/utils'
 
-type SalesChartPoint = {
-  period: string
-  revenue: number
-  orders: number
-}
+type RangeMode = '7d' | '5w'
 
-const formatPeriodLabel = (period: string) => {
+const formatPeriodLabel = (period: string, mode: RangeMode) => {
   const parsedDate = new Date(period)
+  if (Number.isNaN(parsedDate.getTime())) return period
 
-  if (Number.isNaN(parsedDate.getTime())) {
-    return period
+  if (mode === '5w') {
+    return parsedDate.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
   }
 
-  return parsedDate.toLocaleDateString('fr-FR', {
-    day: '2-digit',
-    month: '2-digit',
-  })
+  return parsedDate.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
+}
+
+function computeRange(days: number) {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - days)
+  return {
+    startDate: start.toISOString(),
+    endDate: end.toISOString(),
+  }
 }
 
 export default function SalesHistogram() {
-  const [rangeMode, setRangeMode] = useState<'7d' | '5w'>('7d')
-  const [sales, setSales] = useState<SalesChartPoint[]>([])
+  const [rangeMode, setRangeMode] = useState<RangeMode>('7d')
+  const [sales, setSales] = useState<SalesTimelinePoint[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
@@ -35,32 +41,25 @@ export default function SalesHistogram() {
       setIsLoading(true)
 
       try {
-        const response = await analyticsApi.getSales({ groupBy: rangeMode === '7d' ? 'day' : 'week' })
-        const safeTimeline = Array.isArray(response?.sales?.timeline)
-          ? response.sales.timeline
-          : []
-
-        if (!isMounted) {
-          return
-        }
-
-        setSales(rangeMode === '7d' ? safeTimeline.slice(-7) : safeTimeline.slice(-5))
+        const days = rangeMode === '7d' ? 7 : 35
+        const { startDate, endDate } = computeRange(days)
+        const response = await analyticsApi.getSales({
+          startDate,
+          endDate,
+          groupBy: rangeMode === '7d' ? 'day' : 'week',
+        })
+        if (!isMounted) return
+        setSales(Array.isArray(response?.sales) ? response.sales : [])
       } catch (error) {
-        if (!isMounted) {
-          return
-        }
-
-        console.error('❌ Erreur SalesHistogram:', error)
+        if (!isMounted) return
+        console.error('Erreur SalesHistogram:', error)
         setSales([])
       } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
+        if (isMounted) setIsLoading(false)
       }
     }
 
     void loadSales()
-
     return () => {
       isMounted = false
     }
@@ -68,12 +67,12 @@ export default function SalesHistogram() {
 
   const chartData = useMemo(
     () =>
-      (sales ?? []).map((point) => ({
-        label: formatPeriodLabel(point.period),
-        revenue: point.revenue,
-        orders: point.orders,
+      sales.map((point) => ({
+        label: formatPeriodLabel(point.period, rangeMode),
+        revenue: Number(point.revenue) || 0,
+        orders: Number(point.orderCount) || 0,
       })),
-    [sales]
+    [sales, rangeMode]
   )
 
   const hasData = chartData.length > 0
@@ -81,21 +80,19 @@ export default function SalesHistogram() {
   return (
     <div className="app-panel p-5 md:p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
-        <h2 className="text-lg font-heading font-semibold text-dark">
-          Ventes (timeline API)
-        </h2>
+        <h2 className="text-lg font-heading font-semibold text-dark">Timeline des ventes</h2>
         <select
           className="input-base w-auto px-3 py-1"
           value={rangeMode}
-          onChange={(event) => setRangeMode(event.target.value as '7d' | '5w')}
-          aria-label="Periode du graphique ventes"
+          onChange={(event) => setRangeMode(event.target.value as RangeMode)}
+          aria-label="Période du graphique ventes"
         >
           <option value="7d">7 jours</option>
           <option value="5w">5 semaines</option>
         </select>
       </div>
 
-      {isLoading && <p className="text-sm text-gray-500">Chargement des ventes...</p>}
+      {isLoading && <p className="text-sm text-gray-500">Chargement des ventes…</p>}
 
       {!isLoading && !hasData && (
         <p className="text-sm text-gray-500">Aucune donnée de vente disponible pour cette période.</p>
@@ -108,11 +105,8 @@ export default function SalesHistogram() {
             <XAxis dataKey="label" stroke="#6b7280" />
             <YAxis stroke="#6b7280" />
             <Tooltip
-              formatter={(value, name) => {
-                if (name === 'CA') {
-                  return [`€${value}`, name]
-                }
-
+              formatter={(value: number, name: string) => {
+                if (name === 'CA') return [formatCurrency(value), name]
                 return [value, name]
               }}
               contentStyle={{

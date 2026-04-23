@@ -66,8 +66,8 @@ export default function CategoryDetailPage() {
         label: 'Image',
         render: (product) => (
           <div className="relative h-10 w-10 overflow-hidden rounded-lg bg-gray-100">
-            {product.images[0] ? (
-              <Image src={product.images[0]} alt={product.name} width={40} height={40} className="h-full w-full object-cover" unoptimized />
+            {product.images[0]?.url ? (
+              <Image src={product.images[0].url} alt={product.name} width={40} height={40} className="h-full w-full object-cover" unoptimized />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-[10px] text-gray-400">IMG</div>
             )}

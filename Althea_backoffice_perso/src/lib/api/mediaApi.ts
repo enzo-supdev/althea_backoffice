@@ -1,38 +1,99 @@
 import axiosInstance from './axiosInstance';
-import { ApiResponse, MediaUploadResponse } from './types';
+import {
+  ApiResponse,
+  MediaBulkUploadItem,
+  MediaBulkUploadResponse,
+  MediaUploadResponse,
+} from './types';
+
+/**
+ * Construit l'URL publique d'un fichier media à partir de sa `ref`.
+ * Le backend expose GET /media/:ref (pas d'auth, cache 1 an).
+ *
+ * Accepte aussi une URL absolue (http/https) ou un chemin relatif
+ * déjà résolu — dans ces cas, retourne la valeur telle quelle.
+ */
+export function resolveMediaUrl(refOrUrl: string | null | undefined): string {
+  if (!refOrUrl) {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(refOrUrl) || refOrUrl.startsWith('/')) {
+    return refOrUrl;
+  }
+
+  const baseUrl = (axiosInstance.defaults.baseURL ?? '').replace(/\/+$/, '');
+  if (!baseUrl) {
+    return refOrUrl;
+  }
+
+  return `${baseUrl}/media/${refOrUrl}`;
+}
 
 export const mediaApi = {
+  /**
+   * POST /media/upload
+   * Uploade un fichier (image, vidéo, doc). Max 10 MB.
+   * Le backend peut répondre soit { success, data: {...} } soit l'objet direct.
+   */
   async upload(file: File): Promise<MediaUploadResponse> {
     const formData = new FormData();
     formData.append('file', file);
 
-    const { data } = await axiosInstance.post<ApiResponse<MediaUploadResponse>>('/media/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return data.data;
+    const { data } = await axiosInstance.post<any>('/media/upload', formData);
+    const payload: MediaUploadResponse = (data?.data ?? data) as MediaUploadResponse;
+
+    if (!payload?.ref) {
+      throw new Error(
+        `Réponse upload invalide : pas de "ref" dans ${JSON.stringify(data)?.slice(0, 200)}`,
+      );
+    }
+
+    return payload;
   },
 
+  /**
+   * GET /media/:ref — renvoie le Blob du fichier. Pas d'auth requise.
+   * Pour un simple affichage <img>, utiliser directement resolveMediaUrl(ref).
+   */
   async getByRef(ref: string): Promise<Blob> {
     const { data } = await axiosInstance.get<Blob>(`/media/${ref}`, { responseType: 'blob' });
     return data;
   },
 
+  /**
+   * DELETE /media/:ref
+   */
   async delete(ref: string): Promise<{ message: string }> {
     const { data } = await axiosInstance.delete<ApiResponse<{ message: string }>>(`/media/${ref}`);
     return data.data;
   },
 
-  async bulkUpload(files: File[]): Promise<MediaUploadResponse[]> {
+  /**
+   * POST /media/admin/bulk-upload (max 10 fichiers).
+   * Renvoie { files: [...], count }.
+   */
+  async bulkUpload(files: File[]): Promise<MediaBulkUploadItem[]> {
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
 
-    const { data } = await axiosInstance.post<ApiResponse<MediaUploadResponse[]>>('/media/admin/bulk-upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-    return data.data;
+    const { data } = await axiosInstance.post<ApiResponse<MediaBulkUploadResponse>>(
+      '/media/admin/bulk-upload',
+      formData,
+    );
+    return data.data.files;
   },
 
-  async listAll(params?: { type?: 'image' | 'pdf' | 'document'; search?: string; page?: number; limit?: number }): Promise<unknown> {
+  /**
+   * GET /media/admin/all — liste paginée des fichiers.
+   */
+  async listAll(params?: {
+    type?: 'image' | 'video' | 'document';
+    search?: string;
+    uploadedBy?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<unknown> {
     const { data } = await axiosInstance.get<ApiResponse<unknown>>('/media/admin/all', { params });
     return data.data;
   },

@@ -2,27 +2,33 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
+import {
   X,
-  LayoutDashboard, 
-  Package, 
-  FolderTree, 
-  Users, 
-  ShoppingCart, 
-  FileText, 
+  LayoutDashboard,
+  Package,
+  FolderTree,
+  Users,
+  ShoppingCart,
+  FileText,
   MessageSquare,
+  BarChart3,
+  Scale,
+  ImageIcon,
   Settings
 } from 'lucide-react'
 import clsx from 'clsx'
 
 const navigation = [
   { name: 'Tableau de bord', href: '/dashboard', icon: LayoutDashboard },
+  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
   { name: 'Produits', href: '/products', icon: Package },
   { name: 'Catégories', href: '/categories', icon: FolderTree },
   { name: 'Utilisateurs', href: '/users', icon: Users },
   { name: 'Commandes', href: '/orders', icon: ShoppingCart },
   { name: 'Factures', href: '/invoices', icon: FileText },
   { name: 'Messages', href: '/messages', icon: MessageSquare },
+  { name: 'Médias', href: '/media', icon: ImageIcon },
+  { name: 'Pages légales', href: '/legal', icon: Scale },
   { name: 'Paramètres', href: '/settings', icon: Settings },
 ]
 

@@ -3,21 +3,27 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthContext } from '@/contexts/AuthContext';
-import type { LoginRequest } from '@/lib/api/types';
-import { authApi } from '@/lib/api';
+import { isTwoFaRequiredResponse, type LoginRequest } from '@/lib/api/types';
 import { TWO_FACTOR_PENDING_KEY, TWO_FACTOR_VERIFIED_AT_KEY } from '@/lib/security';
 
 export const LoginForm = () => {
   const router = useRouter();
-  const { login, logout, error: authError, clearError } = useAuthContext();
-  
+  const { login, completeTwoFaLogin, logout, error: authError, clearError } = useAuthContext();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [otpCode, setOtpCode] = useState('');
-  const [requires2fa, setRequires2fa] = useState(false);
-  const [pending2faChallengeId, setPending2faChallengeId] = useState('');
+  const [tempToken, setTempToken] = useState('');
+
+  const requires2fa = Boolean(tempToken);
+
+  const resetTwoFaState = () => {
+    setTempToken('');
+    setOtpCode('');
+    localStorage.removeItem(TWO_FACTOR_PENDING_KEY);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,24 +34,25 @@ export const LoginForm = () => {
     try {
       const credentials: LoginRequest = { email, password };
       const response = await login(credentials);
+      if (!response) return;
 
-      if (response?.user?.role !== 'admin') {
+      if (isTwoFaRequiredResponse(response)) {
+        // Le tempToken reste en mémoire (state React) uniquement,
+        // jamais en localStorage / sessionStorage (expire en 5 min).
+        localStorage.setItem(TWO_FACTOR_PENDING_KEY, 'true');
+        localStorage.removeItem(TWO_FACTOR_VERIFIED_AT_KEY);
+        setTempToken(response.tempToken);
+        return;
+      }
+
+      if (response.user?.role !== 'admin') {
         logout();
         setError('Accès refusé: ce compte ne dispose pas des droits administrateur.');
         return;
       }
 
-      if (response?.twoFactorRequired) {
-        localStorage.setItem(TWO_FACTOR_PENDING_KEY, 'true');
-        localStorage.removeItem(TWO_FACTOR_VERIFIED_AT_KEY);
-        setPending2faChallengeId(response.twoFactorChallengeId ?? '');
-        setRequires2fa(true);
-        return;
-      }
-
       localStorage.removeItem(TWO_FACTOR_PENDING_KEY);
       localStorage.setItem(TWO_FACTOR_VERIFIED_AT_KEY, new Date().toISOString());
-
       router.push('/dashboard');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Erreur de connexion';
@@ -62,44 +69,35 @@ export const LoginForm = () => {
     setError('');
 
     try {
-      const result = await authApi.verifyTwoFactor({
-        code: otpCode.trim(),
-        challengeId: pending2faChallengeId || undefined,
-      });
+      const result = await completeTwoFaLogin(tempToken, otpCode.trim());
 
-      if (!result.verified) {
-        setError('Code 2FA invalide. Reessayez.');
+      if (result.user.role !== 'admin') {
+        logout();
+        resetTwoFaState();
+        setError('Accès refusé: ce compte ne dispose pas des droits administrateur.');
         return;
-      }
-
-      if (result.accessToken) {
-        localStorage.setItem('accessToken', result.accessToken);
-      }
-
-      if (result.refreshToken) {
-        localStorage.setItem('refreshToken', result.refreshToken);
       }
 
       localStorage.removeItem(TWO_FACTOR_PENDING_KEY);
       localStorage.setItem(TWO_FACTOR_VERIFIED_AT_KEY, new Date().toISOString());
-      setRequires2fa(false);
-      setPending2faChallengeId('');
+      setTempToken('');
       setOtpCode('');
       router.push('/dashboard');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Verification 2FA impossible';
-      setError(message);
+      const isExpired = /token|expir/i.test(message);
+      setError(isExpired ? 'Session 2FA expirée, recommencez la connexion.' : message);
+      if (isExpired) {
+        resetTwoFaState();
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleCancel2fa = () => {
-    localStorage.removeItem(TWO_FACTOR_PENDING_KEY);
+    resetTwoFaState();
     logout();
-    setRequires2fa(false);
-    setPending2faChallengeId('');
-    setOtpCode('');
   };
 
   return (
@@ -114,7 +112,7 @@ export const LoginForm = () => {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          disabled={loading}
+          disabled={loading || requires2fa}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
           placeholder="vous@example.com"
         />
@@ -130,7 +128,7 @@ export const LoginForm = () => {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
-          disabled={loading}
+          disabled={loading || requires2fa}
           className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
           placeholder="••••••••"
         />
@@ -153,9 +151,13 @@ export const LoginForm = () => {
       ) : (
         <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
           <p className="text-sm font-medium text-gray-800">Verification 2FA requise</p>
+          <p className="text-xs text-gray-500">
+            Ouvrez votre application d&apos;authentification et saisissez le code à 6 chiffres.
+          </p>
           <input
             type="text"
             inputMode="numeric"
+            autoComplete="one-time-code"
             value={otpCode}
             onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
             placeholder="Code a 6 chiffres"
@@ -166,7 +168,7 @@ export const LoginForm = () => {
               type="button"
               onClick={handleValidate2fa}
               disabled={loading || otpCode.trim().length !== 6}
-              className="flex-1 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex-1 px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? 'Verification...' : 'Valider le code'}
             </button>

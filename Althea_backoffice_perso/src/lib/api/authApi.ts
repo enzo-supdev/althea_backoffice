@@ -3,19 +3,22 @@ import {
   AuthResponse,
   RefreshTokenResponse,
   LoginRequest,
+  LoginResponse,
   RegisterRequest,
   ChangePasswordRequest,
   ApiResponse,
-  TwoFactorStatusResponse,
-  TwoFactorVerifyRequest,
-  TwoFactorVerifyResponse,
+  TwoFaSetupResponse,
+  TwoFaVerifyLoginRequest,
+  TwoFaConfirmRequest,
+  TwoFaDisableRequest,
 } from './types';
 
 /**
  * Gestion de l'authentification
  *  - Inscription, connexion, déconnexion
  *  - Refresh token, change password
- *  - Verif email, forgot password, reset password
+ *  - Vérif email, forgot password, reset password
+ *  - 2FA admin (setup / confirm / verify login / disable)
  */
 export const authApi = {
   /**
@@ -55,10 +58,12 @@ export const authApi = {
 
   /**
    * POST /auth/login
-   * Authentifie un utilisateur
+   * Authentifie un utilisateur. Pour un admin avec 2FA activé, la réponse
+   * contient `{ twoFaRequired: true, tempToken }` au lieu des tokens —
+   * le front doit alors appeler `verifyTwoFaLogin`.
    */
-  async login(input: LoginRequest): Promise<AuthResponse> {
-    const { data } = await axiosInstance.post<ApiResponse<AuthResponse>>(
+  async login(input: LoginRequest): Promise<LoginResponse> {
+    const { data } = await axiosInstance.post<ApiResponse<LoginResponse>>(
       '/auth/login',
       input
     );
@@ -90,7 +95,6 @@ export const authApi = {
 
   /**
    * POST /auth/forgot-password
-   * Envoie un email de réinitialisation du mot de passe
    */
   async forgotPassword(email: string): Promise<{ message: string }> {
     const { data } = await axiosInstance.post<ApiResponse<{ message: string }>>(
@@ -102,7 +106,6 @@ export const authApi = {
 
   /**
    * POST /auth/reset-password/:token
-   * Réinitialise le mot de passe via le token
    */
   async resetPassword(token: string, password: string): Promise<{ message: string }> {
     const { data } = await axiosInstance.post<ApiResponse<{ message: string }>>(
@@ -114,7 +117,6 @@ export const authApi = {
 
   /**
    * POST /auth/change-password
-   * Change le mot de passe de l'utilisateur connecté
    */
   async changePassword(input: ChangePasswordRequest): Promise<{ message: string }> {
     const { data } = await axiosInstance.post<ApiResponse<{ message: string }>>(
@@ -125,38 +127,50 @@ export const authApi = {
   },
 
   /**
-   * GET /auth/2fa/status
-   * Retourne l'etat 2FA pour l'utilisateur connecte
+   * POST /auth/2fa/setup (admin only, JWT Bearer requis).
+   * Génère un secret TOTP + un QR code. Le 2FA reste inactif tant que
+   * `confirmTwoFa` n'a pas été appelé avec un code valide.
    */
-  async getTwoFactorStatus(): Promise<TwoFactorStatusResponse> {
-    const { data } = await axiosInstance.get<ApiResponse<TwoFactorStatusResponse>>('/auth/2fa/status');
+  async setupTwoFa(): Promise<TwoFaSetupResponse> {
+    const { data } = await axiosInstance.post<ApiResponse<TwoFaSetupResponse>>(
+      '/auth/2fa/setup'
+    );
     return data.data;
   },
 
   /**
-   * POST /auth/2fa/enable
-   * Active 2FA (TOTP/HOTP) et retourne les infos de provisionning
+   * POST /auth/2fa/confirm (admin only).
+   * Active effectivement le 2FA après vérification d'un premier code TOTP.
    */
-  async enableTwoFactor(): Promise<TwoFactorStatusResponse> {
-    const { data } = await axiosInstance.post<ApiResponse<TwoFactorStatusResponse>>('/auth/2fa/enable');
+  async confirmTwoFa(input: TwoFaConfirmRequest): Promise<{ success: true }> {
+    const { data } = await axiosInstance.post<ApiResponse<{ success: true }>>(
+      '/auth/2fa/confirm',
+      input
+    );
     return data.data;
   },
 
   /**
-   * POST /auth/2fa/disable
-   * Desactive 2FA pour l'utilisateur connecte
+   * POST /auth/2fa/verify (public, utilise le tempToken renvoyé par /login).
+   * Retourne les tokens d'accès définitifs si le code TOTP est valide.
    */
-  async disableTwoFactor(): Promise<{ message: string }> {
-    const { data } = await axiosInstance.post<ApiResponse<{ message: string }>>('/auth/2fa/disable');
+  async verifyTwoFaLogin(input: TwoFaVerifyLoginRequest): Promise<AuthResponse> {
+    const { data } = await axiosInstance.post<ApiResponse<AuthResponse>>(
+      '/auth/2fa/verify',
+      input
+    );
     return data.data;
   },
 
   /**
-   * POST /auth/2fa/verify
-   * Valide un challenge 2FA serveur
+   * POST /auth/2fa/disable (admin only).
+   * Nécessite code TOTP + mot de passe courant.
    */
-  async verifyTwoFactor(input: TwoFactorVerifyRequest): Promise<TwoFactorVerifyResponse> {
-    const { data } = await axiosInstance.post<ApiResponse<TwoFactorVerifyResponse>>('/auth/2fa/verify', input);
+  async disableTwoFa(input: TwoFaDisableRequest): Promise<{ success: true }> {
+    const { data } = await axiosInstance.post<ApiResponse<{ success: true }>>(
+      '/auth/2fa/disable',
+      input
+    );
     return data.data;
   },
 };

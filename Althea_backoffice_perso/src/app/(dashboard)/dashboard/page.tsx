@@ -5,6 +5,7 @@ import AverageBasketChart from '@/components/dashboard/AverageBasketChart'
 import QuickActions from '@/components/dashboard/QuickActions'
 import RecentOrdersPanel from '@/components/dashboard/RecentOrdersPanel'
 import PageHeader from '@/components/layout/PageHeader'
+import OverviewPanel from '@/components/analytics/OverviewPanel'
 
 export default function DashboardPage() {
   return (
@@ -16,6 +17,8 @@ export default function DashboardPage() {
       />
 
       <StatsCards />
+
+      <OverviewPanel />
 
       <QuickActions />
 

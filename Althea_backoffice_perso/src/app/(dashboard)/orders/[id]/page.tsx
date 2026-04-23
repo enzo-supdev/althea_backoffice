@@ -1,15 +1,57 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Download, FileText, RefreshCw } from 'lucide-react'
+import axios from 'axios'
 import PageHeader from '@/components/layout/PageHeader'
 import Badge from '@/components/ui/Badge'
 import { useToast } from '@/components/ui/ToastProvider'
-import { ApiError, ordersApi } from '@/lib/api'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { ApiError, invoicesApi, ordersApi } from '@/lib/api'
+import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { Order } from '@/types'
+
+type LinkedInvoice = {
+  id: string
+  invoiceNumber: string
+  status: 'paid' | 'pending' | 'cancelled'
+  amount: number
+  createdAt: Date
+}
+
+function toLinkedInvoice(raw: any): LinkedInvoice | null {
+  if (!raw?.id) return null
+  const createdAt = raw.createdAt instanceof Date ? raw.createdAt : new Date(raw.createdAt ?? Date.now())
+  return {
+    id: String(raw.id),
+    invoiceNumber: raw.invoiceNumber ?? `INV-${raw.id}`,
+    status: (raw.status as LinkedInvoice['status']) ?? 'pending',
+    amount: Number(raw.amount ?? 0),
+    createdAt,
+  }
+}
+
+function extractErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) return error.message
+  if (axios.isAxiosError(error)) {
+    const body = error.response?.data as
+      | { message?: string; error?: { message?: string }; errors?: Record<string, string[] | string> }
+      | undefined
+    if (body?.error?.message) return body.error.message
+    if (body?.message) return body.message
+    if (body?.errors) {
+      const messages = Object.values(body.errors)
+        .flatMap((value) => (Array.isArray(value) ? value : [value]))
+        .filter(Boolean)
+        .join(' ')
+      if (messages) return messages
+    }
+    if (error.response?.status) return `${fallback} (HTTP ${error.response.status})`
+  }
+  if (error instanceof Error) return error.message
+  return fallback
+}
 
 const getStatusBadge = (status: string) => {
   switch (status) {
@@ -85,6 +127,9 @@ export default function OrderDetailPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isUpdating, setIsUpdating] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [invoice, setInvoice] = useState<LinkedInvoice | null>(null)
+  const [invoiceLoading, setInvoiceLoading] = useState(false)
+  const [invoiceDownloading, setInvoiceDownloading] = useState(false)
 
   useEffect(() => {
     if (!orderId) {
@@ -139,8 +184,84 @@ export default function OrderDetailPage() {
     [isUpdating, order],
   )
 
+  const loadInvoice = useCallback(
+    async (currentOrder: Order, mode: 'lookup' | 'ensure' = 'lookup') => {
+      setInvoiceLoading(true)
+      try {
+        const found = mode === 'ensure'
+          ? await invoicesApi.ensureInvoiceForOrder(currentOrder.id, currentOrder.orderNumber)
+          : await invoicesApi.findInvoiceForOrder(currentOrder.id, currentOrder.orderNumber)
+        setInvoice(toLinkedInvoice(found))
+        return toLinkedInvoice(found)
+      } catch (error) {
+        console.warn('[orders/id] loadInvoice failed:', error)
+        setInvoice(null)
+        return null
+      } finally {
+        setInvoiceLoading(false)
+      }
+    },
+    [],
+  )
+
+  useEffect(() => {
+    if (!order) return
+    void loadInvoice(order, 'lookup')
+  }, [order, loadInvoice])
+
+  const handleGenerateInvoice = async () => {
+    if (!order) return
+    const generated = await loadInvoice(order, 'ensure')
+    pushToast(
+      generated
+        ? {
+            type: 'success',
+            title: 'Facture générée',
+            message: `Facture ${generated.invoiceNumber} liée à la commande.`,
+          }
+        : {
+            type: 'error',
+            title: 'Génération impossible',
+            message: 'Le serveur n a pas pu générer de facture pour cette commande.',
+          },
+    )
+  }
+
+  const handleDownloadInvoice = async () => {
+    if (!invoice) return
+    setInvoiceDownloading(true)
+    try {
+      const blob = await invoicesApi.downloadPdf(invoice.id)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `${invoice.invoiceNumber.toLowerCase()}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Téléchargement impossible',
+        message: extractErrorMessage(error, 'La facture PDF n a pas pu être récupérée.'),
+      })
+    } finally {
+      setInvoiceDownloading(false)
+    }
+  }
+
   const handleStatusUpdate = async (status: Order['status']) => {
     if (!order) return
+
+    console.info(
+      '[handleStatusUpdate] statut actuel:',
+      order.status,
+      '→ cible:',
+      status,
+      '| paymentStatus:',
+      order.paymentStatus
+    )
 
     setIsUpdating(true)
     try {
@@ -152,10 +273,17 @@ export default function OrderDetailPage() {
         message: `La commande est maintenant ${getStatusBadge(status).label.toLowerCase()}.`,
       })
     } catch (error) {
+      if (axios.isAxiosError(error)) {
+        console.error(
+          'Erreur updateStatus commande:',
+          error.response?.status,
+          JSON.stringify(error.response?.data, null, 2)
+        )
+      }
       pushToast({
         type: 'error',
         title: 'Mise a jour impossible',
-        message: error instanceof ApiError ? error.message : 'Le statut de commande n a pas pu etre mis a jour.',
+        message: extractErrorMessage(error, 'Le statut de commande n a pas pu etre mis a jour.'),
       })
     } finally {
       setIsUpdating(false)
@@ -165,20 +293,43 @@ export default function OrderDetailPage() {
   const handleRefund = async () => {
     if (!order) return
 
-    setIsUpdating(true)
-    try {
-      await ordersApi.processRefund(order.id)
-      setOrder({ ...order, paymentStatus: 'refunded' })
-      pushToast({
-        type: 'success',
-        title: 'Remboursement traite',
-        message: 'Le statut de paiement passe a rembourse.',
-      })
-    } catch (error) {
+    const amount = Number(order.totalAmount) || 0
+    if (amount <= 0) {
       pushToast({
         type: 'error',
         title: 'Remboursement impossible',
-        message: error instanceof ApiError ? error.message : 'Le remboursement a echoue.',
+        message: 'Le montant de la commande est nul.',
+      })
+      return
+    }
+
+    setIsUpdating(true)
+    try {
+      await invoicesApi.refundOrder({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        amount,
+        reason: `Remboursement commande ${order.orderNumber}`,
+        sendEmail: true,
+      })
+      setOrder({ ...order, paymentStatus: 'refunded' })
+      pushToast({
+        type: 'success',
+        title: 'Avoir créé',
+        message: 'Un avoir a été généré pour cette commande.',
+      })
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        console.error(
+          'Erreur refund commande:',
+          error.response?.status,
+          JSON.stringify(error.response?.data, null, 2)
+        )
+      }
+      pushToast({
+        type: 'error',
+        title: 'Remboursement impossible',
+        message: extractErrorMessage(error, 'Le remboursement a echoue.'),
       })
     } finally {
       setIsUpdating(false)
@@ -339,6 +490,86 @@ export default function OrderDetailPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h4 className="flex items-center gap-2 font-semibold text-dark">
+              <FileText className="h-4 w-4 text-primary" /> Facture liée
+            </h4>
+            <p className="mt-1 text-xs text-gray-500">
+              Créée automatiquement à la création de la commande (snapshots figés).
+            </p>
+          </div>
+          {invoice ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadInvoice}
+                disabled={invoiceDownloading}
+                className="inline-flex items-center gap-2 rounded-lg border border-primary/20 px-3 py-2 text-sm font-medium text-dark transition-colors hover:bg-primary-light/40 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Download className="h-4 w-4" />
+                {invoiceDownloading ? 'Téléchargement...' : 'Télécharger PDF'}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleGenerateInvoice}
+              disabled={invoiceLoading}
+              className="inline-flex items-center gap-2 rounded-lg border border-primary/20 px-3 py-2 text-sm font-medium text-dark transition-colors hover:bg-primary-light/40 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${invoiceLoading ? 'animate-spin' : ''}`} />
+              {invoiceLoading ? 'Génération...' : 'Générer la facture'}
+            </button>
+          )}
+        </div>
+
+        {invoice ? (
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div>
+              <p className="text-xs text-gray-500">Numéro</p>
+              <Link
+                href={`/invoices?query=${encodeURIComponent(invoice.invoiceNumber)}`}
+                className="font-medium text-primary hover:underline"
+              >
+                {invoice.invoiceNumber}
+              </Link>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Montant</p>
+              <p className="font-medium text-dark">{formatCurrency(invoice.amount)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Statut</p>
+              <Badge
+                variant={
+                  invoice.status === 'paid'
+                    ? 'success'
+                    : invoice.status === 'pending'
+                      ? 'warning'
+                      : 'error'
+                }
+              >
+                {invoice.status === 'paid' && 'Payee'}
+                {invoice.status === 'pending' && 'En attente'}
+                {invoice.status === 'cancelled' && 'Annulee'}
+              </Badge>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Émise le</p>
+              <p className="font-medium text-dark">{formatDate(invoice.createdAt)}</p>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-4 text-sm text-gray-600">
+            {invoiceLoading
+              ? 'Chargement de la facture...'
+              : 'Aucune facture n est encore liée. Utilise "Générer la facture" pour la créer (backfill).'}
+          </p>
+        )}
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-4">

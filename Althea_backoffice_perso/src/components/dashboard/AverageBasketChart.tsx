@@ -3,124 +3,103 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import { analyticsApi } from '@/lib/api'
+import type { CategoryStatsItem } from '@/lib/api/types'
+import { formatCurrency } from '@/lib/utils'
 
-type BasketPoint = {
-  label: string
-  averageBasket: number
-  revenue: number
-  quantity: number
+type PresetKey = '7d' | '30d' | '90d'
+
+const presets: Record<PresetKey, { label: string; days: number }> = {
+  '7d': { label: '7 jours', days: 7 },
+  '30d': { label: '30 jours', days: 30 },
+  '90d': { label: '90 jours', days: 90 },
 }
 
-type ProductAnalyticsPayload = {
-  productAnalytics?: {
-    topSellers?: Array<Record<string, unknown>>
+function computeRange(days: number) {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - days)
+  return {
+    startDate: start.toISOString(),
+    endDate: end.toISOString(),
   }
-}
-
-const getStringValue = (input: Record<string, unknown>, keys: string[]) => {
-  for (const key of keys) {
-    const value = input[key]
-    if (typeof value === 'string' && value.trim()) {
-      return value
-    }
-  }
-
-  return null
-}
-
-const getNumberValue = (input: Record<string, unknown>, keys: string[]) => {
-  for (const key of keys) {
-    const value = input[key]
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value
-    }
-  }
-
-  return null
 }
 
 export default function AverageBasketChart() {
-  const [period, setPeriod] = useState<'7d' | '5w'>('7d')
-  const [sales, setSales] = useState<BasketPoint[]>([])
+  const [presetKey, setPresetKey] = useState<PresetKey>('30d')
+  const [categories, setCategories] = useState<CategoryStatsItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     let isMounted = true
 
-    const loadAverageBasket = async () => {
+    const loadCategories = async () => {
       setIsLoading(true)
-
       try {
-        const limit = period === '7d' ? 7 : 12
-        const response = (await analyticsApi.getProducts({ limit, sortBy: 'revenue' })) as ProductAnalyticsPayload
-        const topSellers = response.productAnalytics?.topSellers ?? []
-
-        if (!isMounted) {
-          return
-        }
-
-        const mapped = topSellers
-          .map((item, index) => {
-            const revenue = getNumberValue(item, ['revenue', 'totalRevenue', 'sales']) ?? 0
-            const quantity = getNumberValue(item, ['quantitySold', 'quantity']) ?? 0
-            const averageBasket = quantity > 0 ? revenue / quantity : 0
-
-            return {
-              label:
-                getStringValue(item, ['categoryName', 'category', 'name']) ??
-                `Categorie ${index + 1}`,
-              averageBasket: Number(averageBasket.toFixed(2)),
-              revenue,
-              quantity,
-            }
-          })
-          .filter((item) => item.revenue > 0)
-
-        setSales(mapped)
+        const { startDate, endDate } = computeRange(presets[presetKey].days)
+        const response = await analyticsApi.getCategoriesStats({
+          startDate,
+          endDate,
+          limit: 12,
+        })
+        if (!isMounted) return
+        setCategories(Array.isArray(response) ? response : [])
       } catch (error) {
-        if (!isMounted) {
-          return
-        }
-        setSales([])
+        if (!isMounted) return
+        console.error('Erreur categories stats (panier moyen):', error)
+        setCategories([])
       } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
+        if (isMounted) setIsLoading(false)
       }
     }
 
-    void loadAverageBasket()
-
+    void loadCategories()
     return () => {
       isMounted = false
     }
-  }, [period])
+  }, [presetKey])
 
-  const hasData = useMemo(() => sales.length > 0, [sales])
+  const chartData = useMemo(() => {
+    return categories
+      .filter((item) => Number(item.revenue) > 0)
+      .map((item) => {
+        const revenue = Number(item.revenue) || 0
+        const orders = Number(item.distinctOrderCount) || 0
+        const quantity = Number(item.quantitySold) || 0
+        return {
+          label: item.categoryName,
+          averageBasket: orders > 0 ? Number((revenue / orders).toFixed(2)) : 0,
+          revenue,
+          quantity,
+        }
+      })
+  }, [categories])
+
+  const hasData = chartData.length > 0
 
   return (
     <div className="app-panel p-5 md:p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-heading font-semibold text-dark">
-            Panier moyen (API)
-          </h2>
+          <h2 className="text-lg font-heading font-semibold text-dark">Panier moyen par catégorie</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Calculé à partir du CA et du nombre de commandes
+            CA catégorie / nombre de commandes distinctes
           </p>
         </div>
         <select
           className="input-base w-auto px-3 py-1"
-          value={period}
-          onChange={(event) => setPeriod(event.target.value as '7d' | '5w')}
-          aria-label="Periode du graphique paniers moyens"
+          value={presetKey}
+          onChange={(event) => setPresetKey(event.target.value as PresetKey)}
+          aria-label="Période du graphique paniers moyens"
         >
-          <option value="7d">7 jours</option>
-          <option value="5w">5 semaines</option>
+          {Object.entries(presets).map(([key, preset]) => (
+            <option key={key} value={key}>
+              {preset.label}
+            </option>
+          ))}
         </select>
       </div>
 
-      {isLoading && <p className="text-sm text-gray-500">Chargement du panier moyen...</p>}
+      {isLoading && <p className="text-sm text-gray-500">Chargement du panier moyen…</p>}
 
       {!isLoading && !hasData && (
         <p className="text-sm text-gray-500">Aucune donnée disponible pour calculer le panier moyen.</p>
@@ -128,20 +107,15 @@ export default function AverageBasketChart() {
 
       {!isLoading && hasData && (
         <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={sales}>
+          <BarChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="label" stroke="#6b7280" />
             <YAxis stroke="#6b7280" />
             <Tooltip
-              formatter={(value, name) => {
-                if (name === 'Panier moyen') {
-                  return [`€${value}`, name]
+              formatter={(value: number, name: string) => {
+                if (name === 'Panier moyen' || name === 'CA catégorie') {
+                  return [formatCurrency(value), name]
                 }
-
-                if (name === 'CA categorie') {
-                  return [`€${value}`, name]
-                }
-
                 return [value, name]
               }}
               contentStyle={{
@@ -153,8 +127,8 @@ export default function AverageBasketChart() {
             />
             <Legend wrapperStyle={{ paddingTop: 12 }} />
             <Bar dataKey="averageBasket" fill="#00a8b5" name="Panier moyen" radius={[6, 6, 0, 0]} />
-            <Bar dataKey="revenue" fill="#003d5c" name="CA categorie" radius={[6, 6, 0, 0]} />
-            <Bar dataKey="quantity" fill="#10b981" name="Quantite" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="revenue" fill="#003d5c" name="CA catégorie" radius={[6, 6, 0, 0]} />
+            <Bar dataKey="quantity" fill="#10b981" name="Quantité" radius={[6, 6, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       )}

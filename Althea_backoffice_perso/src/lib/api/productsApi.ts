@@ -1,5 +1,7 @@
 import axiosInstance from './axiosInstance';
 import axios from 'axios';
+import type { Product as LegacyProduct, ProductImage as LegacyProductImage } from '@/types';
+import { resolveMediaUrl } from './mediaApi';
 import {
   Product,
   ApiResponse,
@@ -41,6 +43,29 @@ function normalizePaginatedResponse<T>(payload: any): PaginatedResponse<T> {
   throw new Error('Format de reponse paginee invalide pour les produits.');
 }
 
+function mapApiImages(images: any[]): LegacyProductImage[] {
+  return images.map((img: any, index: number): LegacyProductImage => {
+    if (typeof img === 'string') {
+      return {
+        id: img,
+        url: resolveMediaUrl(img),
+        imageRef: img,
+        isMain: index === 0,
+        displayOrder: index,
+      };
+    }
+    const ref: string = img.imageRef ?? img.ref ?? '';
+    const url = ref ? resolveMediaUrl(ref) : (img.url ?? '');
+    return {
+      id: img.id ?? ref,
+      url,
+      imageRef: ref,
+      isMain: Boolean(img.isMain),
+      displayOrder: typeof img.displayOrder === 'number' ? img.displayOrder : index,
+    };
+  });
+}
+
 function mapProductToLegacy(product: any): any {
   const category = product.category ?? {
     id: product.categoryId,
@@ -60,9 +85,8 @@ function mapProductToLegacy(product: any): any {
     priceHT: product.priceHt ?? product.priceHT ?? 0,
     tva: product.vatRate ?? product.tva ?? 0,
     category,
-    images: Array.isArray(product.images)
-      ? product.images.map((image: any) => (typeof image === 'string' ? image : image.url))
-      : [],
+    images: Array.isArray(product.images) ? mapApiImages(product.images) : [],
+    mainImageRef: product.mainImageRef ?? null,
     createdAt: new Date(product.createdAt),
     updatedAt: new Date(product.updatedAt),
   };
@@ -76,7 +100,7 @@ export const productsApi = {
    * GET /products
    * Liste legacy des produits publiés
    */
-  async list(): Promise<any[]> {
+  async list(): Promise<LegacyProduct[]> {
     const { data } = await axiosInstance.get('/products');
     const normalized = normalizePaginatedResponse<Product>(data);
     return normalized.data.map(mapProductToLegacy);
@@ -86,7 +110,7 @@ export const productsApi = {
    * GET /products/admin
    * Liste backoffice (admin) avec fallback sur la liste publique
    */
-  async listBackoffice(): Promise<any[]> {
+  async listBackoffice(): Promise<LegacyProduct[]> {
     try {
       const { data } = await axiosInstance.get('/products/admin', {
         params: {
@@ -136,7 +160,7 @@ export const productsApi = {
    * GET /products/top
    * Top 10 produits featured
    */
-  async getTopProducts(): Promise<Product[]> {
+  async getTopProducts(): Promise<LegacyProduct[]> {
     const { data } = await axiosInstance.get<ApiResponse<Product[]>>(
       '/products/top'
     );
@@ -147,7 +171,7 @@ export const productsApi = {
    * GET /products/:slug
    * Détail d'un produit par slug
    */
-  async getBySlug(slug: string): Promise<Product> {
+  async getBySlug(slug: string): Promise<LegacyProduct> {
     const { data } = await axiosInstance.get<ApiResponse<Product>>(
       `/products/${slug}`
     );
@@ -173,20 +197,23 @@ export const productsApi = {
 
   /**
    * GET /products/admin/:id
-   * Récupère un produit admin
+   * Récupère un produit admin — l'API retourne { product, images } imbriqué
    */
-  async getAdminById(id: string): Promise<Product> {
-    const { data } = await axiosInstance.get<ApiResponse<Product>>(
+  async getAdminById(id: string): Promise<LegacyProduct> {
+    const { data } = await axiosInstance.get<ApiResponse<any>>(
       `/products/admin/${id}`
     );
-    return mapProductToLegacy(data.data);
+    const payload = data.data;
+    const product = payload?.product ?? payload;
+    const images = payload?.images ?? product.images ?? [];
+    return mapProductToLegacy({ ...product, images });
   },
 
   /**
    * POST /products/admin
    * Crée un produit
    */
-  async create(input: CreateProductRequest): Promise<Product> {
+  async create(input: CreateProductRequest): Promise<LegacyProduct> {
     const { data } = await axiosInstance.post<ApiResponse<Product>>(
       '/products/admin',
       input
@@ -198,7 +225,7 @@ export const productsApi = {
    * PUT /products/admin/:id
    * Met à jour un produit
    */
-  async update(id: string, input: UpdateProductRequest): Promise<Product> {
+  async update(id: string, input: UpdateProductRequest): Promise<LegacyProduct> {
     const { data } = await axiosInstance.put<ApiResponse<Product>>(
       `/products/admin/${id}`,
       input
@@ -210,7 +237,7 @@ export const productsApi = {
    * POST /products/admin/:id/duplicate
    * Duplique un produit
    */
-  async duplicate(id: string, input: DuplicateProductRequest = {}): Promise<Product> {
+  async duplicate(id: string, input: DuplicateProductRequest = {}): Promise<LegacyProduct> {
     const { data } = await axiosInstance.post<ApiResponse<Product>>(
       `/products/admin/${id}/duplicate`,
       input
@@ -222,7 +249,7 @@ export const productsApi = {
    * PUT /products/admin/:id/stock
    * Met à jour le stock
    */
-  async updateStock(id: string, input: UpdateProductStockRequest): Promise<Product> {
+  async updateStock(id: string, input: UpdateProductStockRequest): Promise<LegacyProduct> {
     const { data } = await axiosInstance.put<ApiResponse<Product>>(
       `/products/admin/${id}/stock`,
       input
@@ -234,7 +261,7 @@ export const productsApi = {
    * PATCH /products/admin/:id/status
    * Met à jour le statut
    */
-  async updateStatus(id: string, input: UpdateProductStatusRequest): Promise<Product> {
+  async updateStatus(id: string, input: UpdateProductStatusRequest): Promise<LegacyProduct> {
     const { data } = await axiosInstance.patch<ApiResponse<Product>>(
       `/products/admin/${id}/status`,
       input
@@ -291,37 +318,68 @@ export const productsApi = {
 
   /**
    * POST /products/admin/:id/images
-   * Ajoute une image
+   * Associe des images existantes (déjà uploadées via /media/upload) à un produit.
+   * Body : { imageRefs: string[] }
    */
-  async addImage(id: string, input: ProductImageRequest): Promise<any> {
+  async addImage(id: string, input: ProductImageRequest): Promise<LegacyProductImage[]> {
     const { data } = await axiosInstance.post<ApiResponse<any>>(
       `/products/admin/${id}/images`,
       input
     );
-    return data.data;
+    const raw = Array.isArray(data.data) ? data.data : [data.data];
+    return mapApiImages(raw);
   },
 
   /**
    * DELETE /products/admin/:id/images/:imageId
-   * Supprime une image
+   * Supprime une image du produit (imageId = UUID de l'image, pas la ref media).
    */
-  async deleteImage(id: string, imageId: string): Promise<{ message: string }> {
-    const { data } = await axiosInstance.delete<ApiResponse<{ message: string }>>(
-      `/products/admin/${id}/images/${imageId}`
-    );
-    return data.data;
+  async deleteImage(id: string, imageId: string): Promise<void> {
+    await axiosInstance.delete(`/products/admin/${id}/images/${imageId}`);
   },
 
   /**
    * PUT /products/admin/:id/images/reorder
-   * Réordonne les images
+   * Réordonne les images — Body : { imageIds: UUID[] } dans l'ordre voulu.
    */
-  async reorderImages(id: string, input: ReorderProductImagesRequest): Promise<any> {
+  async reorderImages(id: string, input: ReorderProductImagesRequest): Promise<LegacyProductImage[]> {
     const { data } = await axiosInstance.put<ApiResponse<any>>(
       `/products/admin/${id}/images/reorder`,
       input
     );
-    return data.data;
+    const raw = Array.isArray(data.data) ? data.data : [];
+    return mapApiImages(raw);
+  },
+
+  /**
+   * GET /products/admin/export
+   * Export CSV des produits (admin).
+   */
+  async exportCsv(): Promise<Blob> {
+    const { data } = await axiosInstance.get<Blob>('/products/admin/export', {
+      responseType: 'blob',
+    });
+    return data;
+  },
+
+  /**
+   * GET /products/admin/export/advanced
+   * Export avancé (CSV/JSON) avec filtres.
+   */
+  async exportAdvanced(params?: {
+    format?: 'csv' | 'json';
+    categoryId?: string;
+    status?: 'draft' | 'published';
+    minPrice?: number;
+    maxPrice?: number;
+    minStock?: number;
+    maxStock?: number;
+  }): Promise<Blob> {
+    const { data } = await axiosInstance.get<Blob>('/products/admin/export/advanced', {
+      params,
+      responseType: 'blob',
+    });
+    return data;
   },
 
   /**

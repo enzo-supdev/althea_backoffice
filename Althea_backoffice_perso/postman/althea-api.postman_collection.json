@@ -1,0 +1,2464 @@
+{
+  "info": {
+    "name": "Althea API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Collection complète de l'API Althea — base : {{baseUrl}}/api/v1\n\nVariables d'environnement requises :\n- baseUrl : ex. http://localhost:3000\n- accessToken : JWT d'accès (rempli automatiquement après /auth/login)\n- refreshToken : JWT de rafraîchissement (rempli automatiquement après /auth/login)"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000" },
+    { "key": "accessToken", "value": "" },
+    { "key": "refreshToken", "value": "" },
+    { "key": "mediaRef", "value": "", "description": "Référence du fichier uploadé — remplie automatiquement par le test image lifecycle" },
+    { "key": "testProductId", "value": "", "description": "UUID du produit de test — rempli automatiquement par le test image lifecycle" },
+    { "key": "testImageId", "value": "", "description": "UUID de l'entrée ProductImage — remplie automatiquement par le test image lifecycle" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health check",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "register"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jean\",\n  \"lastName\": \"Dupont\",\n  \"email\": \"jean.dupont@example.com\",\n  \"password\": \"Password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.data) {",
+                  "  pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "  pm.collectionVariables.set('refreshToken', json.data.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jean.dupont@example.com\",\n  \"password\": \"Password123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "logout"] }
+          }
+        },
+        {
+          "name": "Refresh token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.data) {",
+                  "  pm.collectionVariables.set('accessToken', json.data.accessToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/refresh-token", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "refresh-token"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Verify email",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/verify-email/:token",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "verify-email", ":token"],
+              "variable": [{ "key": "token", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Resend verification",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/resend-verification", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "resend-verification"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jean.dupont@example.com\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Forgot password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/forgot-password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "forgot-password"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"jean.dupont@example.com\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Reset password",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/reset-password/:token",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "reset-password", ":token"],
+              "variable": [{ "key": "token", "value": "" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"password\": \"NewPassword123\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Change password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/change-password", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "change-password"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Password123\",\n  \"newPassword\": \"NewPassword123\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me"] }
+          }
+        },
+        {
+          "name": "Update profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Jean\",\n  \"lastName\": \"Dupont\",\n  \"phone\": \"+33612345678\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Change email",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/me/email", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "email"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"newemail@example.com\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get my orders",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/me/orders?page=1&limit=10",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "orders"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get my invoices",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/me/invoices?page=1&limit=10",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "invoices"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Addresses — Get all",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/me/addresses", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "addresses"] }
+          }
+        },
+        {
+          "name": "Addresses — Create",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/me/addresses", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "addresses"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"street\": \"123 Rue de la Paix\",\n  \"city\": \"Paris\",\n  \"postalCode\": \"75001\",\n  \"country\": \"France\",\n  \"isDefault\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Addresses — Update",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/me/addresses/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "addresses", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"street\": \"456 Avenue des Champs\",\n  \"city\": \"Paris\",\n  \"postalCode\": \"75008\",\n  \"country\": \"France\",\n  \"isDefault\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Addresses — Delete",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/me/addresses/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "addresses", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Payment methods — Get all",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/me/payment-methods", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "payment-methods"] }
+          }
+        },
+        {
+          "name": "Payment methods — Create",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/users/me/payment-methods", "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "payment-methods"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentMethodId\": \"pm_1234567890\",\n  \"isDefault\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "Payment methods — Set default",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/me/payment-methods/:id/default",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "payment-methods", ":id", "default"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Payment methods — Delete",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/me/payment-methods/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "users", "me", "payment-methods", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Products",
+      "item": [
+        {
+          "name": "Get published products",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "category", "value": "", "disabled": true },
+                { "key": "sortBy", "value": "", "disabled": true, "description": "name | priceHt | createdAt | displayOrder" },
+                { "key": "sortOrder", "value": "", "disabled": true, "description": "asc | desc" },
+                { "key": "minPrice", "value": "", "disabled": true },
+                { "key": "maxPrice", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get featured products (top)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/top?limit=6",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "top"],
+              "query": [{ "key": "limit", "value": "6" }]
+            }
+          }
+        },
+        {
+          "name": "Get product by slug",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/:slug",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", ":slug"],
+              "variable": [{ "key": "slug", "value": "mon-produit" }]
+            }
+          }
+        },
+        {
+          "name": "Get similar products",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/:id/similar",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", ":id", "similar"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000", "description": "UUID du produit" }]
+            }
+          }
+        },
+        {
+          "name": "Get products by category",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/category/:categorySlug?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "category", ":categorySlug"],
+              "variable": [{ "key": "categorySlug", "value": "electronique" }],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "sortBy", "value": "", "disabled": true },
+                { "key": "sortOrder", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all products",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true, "description": "draft | published" },
+                { "key": "categoryId", "value": "", "disabled": true },
+                { "key": "sortBy", "value": "", "disabled": true },
+                { "key": "sortOrder", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get product by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Create product",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/products/admin", "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mon produit\",\n  \"slug\": \"mon-produit\",\n  \"description\": \"Description du produit\",\n  \"categoryId\": \"00000000-0000-0000-0000-000000000000\",\n  \"priceHt\": 29.99,\n  \"vatRate\": 20,\n  \"stock\": 100,\n  \"status\": \"draft\",\n  \"isPriority\": false,\n  \"isFeatured\": false,\n  \"displayOrder\": 0,\n  \"mainImageRef\": null,\n  \"technicalSpecs\": [\n    { \"key\": \"Couleur\", \"value\": \"Noir\" }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update product",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mon produit modifié\",\n  \"priceHt\": 34.99,\n  \"stock\": 50\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update product status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id/status",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id", "status"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"published\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update product stock",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id/stock",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id", "stock"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stock\": 50,\n  \"operation\": \"set\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Duplicate product",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id/duplicate",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id", "duplicate"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Mon produit (copie)\",\n  \"copyImages\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Delete product",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Bulk delete products",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/products/admin/bulk", "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", "bulk"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"00000000-0000-0000-0000-000000000001\",\n    \"00000000-0000-0000-0000-000000000002\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Bulk update status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/products/admin/bulk/status", "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", "bulk", "status"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"00000000-0000-0000-0000-000000000001\",\n    \"00000000-0000-0000-0000-000000000002\"\n  ],\n  \"status\": \"published\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Bulk update category",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/products/admin/bulk/category", "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", "bulk", "category"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\n    \"00000000-0000-0000-0000-000000000001\",\n    \"00000000-0000-0000-0000-000000000002\"\n  ],\n  \"categoryId\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Add images to product",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id/images",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id", "images"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageRefs\": [\n    \"1745000000000-uuid-example.jpg\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Delete product image",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id/images/:imageId",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id", "images", ":imageId"],
+              "variable": [
+                { "key": "id", "value": "00000000-0000-0000-0000-000000000000" },
+                { "key": "imageId", "value": "00000000-0000-0000-0000-000000000001" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Reorder product images",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/:id/images/reorder",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", ":id", "images", "reorder"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageIds\": [\n    \"00000000-0000-0000-0000-000000000002\",\n    \"00000000-0000-0000-0000-000000000001\"\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Export products CSV",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/products/admin/export", "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", "export"] }
+          }
+        },
+        {
+          "name": "[Admin] Export products advanced",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/export/advanced?format=csv",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin", "export", "advanced"],
+              "query": [
+                { "key": "format", "value": "csv", "description": "csv | json" },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "categoryId", "value": "", "disabled": true },
+                { "key": "minPrice", "value": "", "disabled": true },
+                { "key": "maxPrice", "value": "", "disabled": true },
+                { "key": "minStock", "value": "", "disabled": true },
+                { "key": "maxStock", "value": "", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Categories",
+      "item": [
+        {
+          "name": "Get active categories",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/v1/categories", "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories"] }
+          }
+        },
+        {
+          "name": "Get category by slug",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/:slug",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories", ":slug"],
+              "variable": [{ "key": "slug", "value": "electronique" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all categories",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/categories/admin", "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories", "admin"] }
+          }
+        },
+        {
+          "name": "[Admin] Create category",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/categories/admin", "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories", "admin"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Électronique\",\n  \"slug\": \"electronique\",\n  \"description\": \"Appareils électroniques\",\n  \"imageRef\": null,\n  \"status\": \"active\",\n  \"displayOrder\": 0\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update category",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/admin/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories", "admin", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Électronique & Informatique\",\n  \"displayOrder\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update category status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/admin/:id/status",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories", "admin", ":id", "status"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"inactive\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Set category image",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/admin/:id/image",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories", "admin", ":id", "image"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageRef\": \"1745000000000-uuid-example.jpg\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Reorder categories",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/categories/admin/reorder", "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories", "admin", "reorder"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categories\": [\n    { \"id\": \"00000000-0000-0000-0000-000000000001\", \"displayOrder\": 0 },\n    { \"id\": \"00000000-0000-0000-0000-000000000002\", \"displayOrder\": 1 }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Delete category",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/categories/admin/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "categories", "admin", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Media",
+      "item": [
+        {
+          "name": "Upload file",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/media/upload", "host": ["{{baseUrl}}"], "path": ["api", "v1", "media", "upload"] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [{ "key": "file", "type": "file", "src": "" }]
+            }
+          }
+        },
+        {
+          "name": "Get file",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/media/:ref",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "media", ":ref"],
+              "variable": [{ "key": "ref", "value": "", "description": "Valeur du champ ref retourné par upload" }]
+            }
+          }
+        },
+        {
+          "name": "Delete file",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/media/:ref",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "media", ":ref"],
+              "variable": [{ "key": "ref", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Bulk upload",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/media/admin/bulk-upload", "host": ["{{baseUrl}}"], "path": ["api", "v1", "media", "admin", "bulk-upload"] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "files", "type": "file", "src": "" },
+                { "key": "files", "type": "file", "src": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all media",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/media/admin/all?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "media", "admin", "all"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "type", "value": "", "disabled": true, "description": "image | video | document" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "uploadedBy", "value": "", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "Search products",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search/products?q=laptop&page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "search", "products"],
+              "query": [
+                { "key": "q", "value": "laptop" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "category", "value": "", "disabled": true },
+                { "key": "minPrice", "value": "", "disabled": true },
+                { "key": "maxPrice", "value": "", "disabled": true },
+                { "key": "inStock", "value": "", "disabled": true },
+                { "key": "featured", "value": "", "disabled": true },
+                { "key": "sort", "value": "", "disabled": true, "description": "name | price | createdAt | relevance" },
+                { "key": "order", "value": "", "disabled": true, "description": "asc | desc" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Search suggest (autocomplete)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/search/suggest?q=lap&limit=10",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "search", "suggest"],
+              "query": [
+                { "key": "q", "value": "lap" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cart",
+      "item": [
+        {
+          "name": "Get cart",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/cart", "host": ["{{baseUrl}}"], "path": ["api", "v1", "cart"] }
+          }
+        },
+        {
+          "name": "Get cart summary",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/cart/summary", "host": ["{{baseUrl}}"], "path": ["api", "v1", "cart", "summary"] }
+          }
+        },
+        {
+          "name": "Add item",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/cart/items", "host": ["{{baseUrl}}"], "path": ["api", "v1", "cart", "items"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": 1,\n  \"quantity\": 2\n}"
+            }
+          }
+        },
+        {
+          "name": "Update item quantity",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cart/items/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "cart", "items", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity\": 3\n}"
+            }
+          }
+        },
+        {
+          "name": "Remove item",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/cart/items/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "cart", "items", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Clear cart",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/cart", "host": ["{{baseUrl}}"], "path": ["api", "v1", "cart"] }
+          }
+        },
+        {
+          "name": "Merge anonymous cart",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/cart/merge", "host": ["{{baseUrl}}"], "path": ["api", "v1", "cart", "merge"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"anonymousCartItems\": [\n    { \"productId\": 1, \"quantity\": 2 },\n    { \"productId\": 3, \"quantity\": 1 }\n  ]\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Checkout",
+      "item": [
+        {
+          "name": "Validate checkout",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/validate", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "validate"] }
+          }
+        },
+        {
+          "name": "Get shipping options",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/shipping-options", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "shipping-options"] }
+          }
+        },
+        {
+          "name": "Create session (shipping)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/shipping", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "shipping"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shippingMethod\": \"STANDARD\",\n  \"shippingAddressId\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "Calculate total",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/calculate-total", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "calculate-total"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"shippingMethod\": \"STANDARD\",\n  \"couponCode\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "Apply coupon",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/apply-coupon", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "apply-coupon"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"couponCode\": \"PROMO2024\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Create payment intent",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/payment-intent", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "payment-intent"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 99.99,\n  \"currency\": \"eur\",\n  \"paymentMethodId\": \"pm_1234567890\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Confirm payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/confirm", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "confirm"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"paymentIntentId\": \"pi_1234567890\",\n  \"sessionId\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "Get session",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/checkout/session/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "session", ":id"],
+              "variable": [{ "key": "id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "Cancel session",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/session", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "session"] }
+          }
+        },
+        {
+          "name": "Get payment methods",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/checkout/payment-methods", "host": ["{{baseUrl}}"], "path": ["api", "v1", "checkout", "payment-methods"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Get my orders",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/me?page=1&limit=10",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "me"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "status", "value": "", "disabled": true, "description": "PENDING | PROCESSING | SHIPPED | DELIVERED | CANCELLED" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get order by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Cancel order",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/:id/cancel",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", ":id", "cancel"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all orders",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/admin?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "admin"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get order by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/admin/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "admin", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update order status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/admin/:id/status",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "admin", ":id", "status"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SHIPPED\",\n  \"trackingNumber\": \"1Z999AA10123456784\",\n  \"notes\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Export orders CSV",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/orders/admin/export",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "orders", "admin", "export"],
+              "query": [
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invoices",
+      "item": [
+        {
+          "name": "Get my invoices",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/invoices/me?page=1&limit=10",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "invoices", "me"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "status", "value": "", "disabled": true, "description": "PENDING | PAID | CANCELLED | REFUNDED" },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get invoice by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/invoices/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "invoices", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Download invoice PDF",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/invoices/:id/pdf",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "invoices", ":id", "pdf"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all invoices",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/invoices/admin?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "invoices", "admin"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true },
+                { "key": "minAmount", "value": "", "disabled": true },
+                { "key": "maxAmount", "value": "", "disabled": true },
+                { "key": "sortBy", "value": "", "disabled": true, "description": "createdAt | issueDate | dueDate | totalAmount" },
+                { "key": "order", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get invoice by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/invoices/admin/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "invoices", "admin", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Create credit note",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/invoices/admin/:id/credit-note",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "invoices", "admin", ":id", "credit-note"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 50.00,\n  \"reason\": \"Produit retourné défectueux\",\n  \"sendEmail\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Export invoices",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/invoices/admin/export?format=csv",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "invoices", "admin", "export"],
+              "query": [
+                { "key": "format", "value": "csv", "description": "csv | xlsx" },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true },
+                { "key": "status", "value": "", "disabled": true }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Homepage",
+      "item": [
+        {
+          "name": "Get carousel slides",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/v1/homepage/carousel", "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "carousel"] }
+          }
+        },
+        {
+          "name": "Get homepage config",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{baseUrl}}/api/v1/homepage/config", "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "config"] }
+          }
+        },
+        {
+          "name": "Get featured products",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/homepage/featured-products?limit=8",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "featured-products"],
+              "query": [{ "key": "limit", "value": "8" }]
+            }
+          }
+        },
+        {
+          "name": "Get banners",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/homepage/banners",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "banners"],
+              "query": [{ "key": "position", "value": "", "disabled": true, "description": "TOP | MIDDLE | BOTTOM | SIDEBAR" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all carousel slides",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/homepage/admin/carousel", "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "carousel"] }
+          }
+        },
+        {
+          "name": "[Admin] Create carousel slide",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/homepage/admin/carousel", "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "carousel"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageRef\": \"1745000000000-uuid-example.jpg\",\n  \"title\": \"Titre du slide\",\n  \"textContent\": \"Description du slide\",\n  \"redirectUrl\": \"/produits\",\n  \"displayOrder\": 0,\n  \"isActive\": true,\n  \"isMainImage\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update carousel slide",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/homepage/admin/carousel/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "carousel", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Titre modifié\",\n  \"isActive\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Delete carousel slide",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/homepage/admin/carousel/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "carousel", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all banners",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/homepage/admin/banners", "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "banners"] }
+          }
+        },
+        {
+          "name": "[Admin] Create banner",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/homepage/admin/banners", "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "banners"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageRef\": \"1745000000000-uuid-example.jpg\",\n  \"title\": \"Promotion été\",\n  \"position\": \"TOP\",\n  \"redirectUrl\": \"/promotions\",\n  \"isActive\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update banner",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/homepage/admin/banners/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "banners", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Promotion modifiée\",\n  \"isActive\": false\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Delete banner",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/homepage/admin/banners/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "banners", ":id"],
+              "variable": [{ "key": "id", "value": "00000000-0000-0000-0000-000000000000" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Add featured product",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/homepage/admin/featured-products", "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "featured-products"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": 1\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Remove featured product",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/homepage/admin/featured-products/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "homepage", "admin", "featured-products", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Legal",
+      "item": [
+        {
+          "name": "Get legal page",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/legal/:type",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "legal", ":type"],
+              "variable": [{ "key": "type", "value": "CGV", "description": "CGV | CGU | MENTIONS_LEGALES | POLITIQUE_CONFIDENTIALITE | COOKIES" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all legal pages",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/legal/admin", "host": ["{{baseUrl}}"], "path": ["api", "v1", "legal", "admin"] }
+          }
+        },
+        {
+          "name": "[Admin] Create or update legal page",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/legal/admin/:type",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "legal", "admin", ":type"],
+              "variable": [{ "key": "type", "value": "CGV", "description": "CGV | CGU | MENTIONS_LEGALES | POLITIQUE_CONFIDENTIALITE | COOKIES" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Conditions Générales de Vente\",\n  \"content\": \"<p>Contenu des CGV...</p>\",\n  \"version\": \"1.1\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get legal page history",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/legal/admin/:type/history",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "legal", "admin", ":type", "history"],
+              "variable": [{ "key": "type", "value": "CGV" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Contact",
+      "item": [
+        {
+          "name": "Submit contact form",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/contact/submit", "host": ["{{baseUrl}}"], "path": ["api", "v1", "contact", "submit"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Jean Dupont\",\n  \"email\": \"jean.dupont@example.com\",\n  \"phone\": \"+33612345678\",\n  \"subject\": \"Problème avec ma commande\",\n  \"message\": \"Bonjour, j'ai un problème avec ma commande #1234. Pouvez-vous m'aider ?\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all messages",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/contact/admin/messages?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "contact", "admin", "messages"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "status", "value": "", "disabled": true, "description": "NEW | IN_PROGRESS | RESOLVED | CLOSED" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get message by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/contact/admin/messages/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "contact", "admin", "messages", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Update message status",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/contact/admin/messages/:id/status",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "contact", "admin", "messages", ":id", "status"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"RESOLVED\",\n  \"response\": \"Bonjour, votre problème a été résolu. Voici la procédure...\",\n  \"notes\": \"Remboursement effectué le 21/04/2026\"\n}"
+            }
+          }
+        },
+        {
+          "name": "[Admin] Delete message",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/contact/admin/messages/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "contact", "admin", "messages", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Chatbot",
+      "item": [
+        {
+          "name": "Create session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/chatbot/sessions", "host": ["{{baseUrl}}"], "path": ["api", "v1", "chatbot", "sessions"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userId\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "Send message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/chatbot/sessions/:sessionId/messages",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "chatbot", "sessions", ":sessionId", "messages"],
+              "variable": [{ "key": "sessionId", "value": "" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Bonjour, j'ai besoin d'aide pour suivre ma commande\",\n  \"sender\": \"user\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Get messages history",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/chatbot/sessions/:sessionId/messages?limit=50",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "chatbot", "sessions", ":sessionId", "messages"],
+              "variable": [{ "key": "sessionId", "value": "" }],
+              "query": [{ "key": "limit", "value": "50" }]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Get all sessions",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/chatbot/admin/sessions?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "chatbot", "admin", "sessions"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "status", "value": "", "disabled": true, "description": "open | closed | escalated" },
+                { "key": "userId", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "[Admin] Escalate session",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/chatbot/admin/sessions/:sessionId/escalate",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "chatbot", "admin", "sessions", ":sessionId", "escalate"],
+              "variable": [{ "key": "sessionId", "value": "" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assignedTo\": null\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Users",
+      "item": [
+        {
+          "name": "Get all users",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users?page=1&limit=20",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "admin", "users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "search", "value": "", "disabled": true },
+                { "key": "role", "value": "", "disabled": true, "description": "USER | ADMIN" },
+                { "key": "status", "value": "", "disabled": true, "description": "ACTIVE | SUSPENDED | DELETED" },
+                { "key": "emailVerified", "value": "", "disabled": true },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true },
+                { "key": "sortBy", "value": "", "disabled": true, "description": "createdAt | lastName | email | lastLogin" },
+                { "key": "order", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get user by id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "admin", "users", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Update user status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/:id/status",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "admin", "users", ":id", "status"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SUSPENDED\",\n  \"reason\": \"Comportement inapproprié signalé\",\n  \"sendEmail\": true\n}"
+            }
+          }
+        },
+        {
+          "name": "Send email to user",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/:id/send-email",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "admin", "users", ":id", "send-email"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"Information importante concernant votre compte\",\n  \"message\": \"Bonjour, nous vous contactons pour...\",\n  \"template\": \"NOTIFICATION\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Force password reset",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/:id/reset-password",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "admin", "users", ":id", "reset-password"],
+              "variable": [{ "key": "id", "value": "1" }]
+            }
+          }
+        },
+        {
+          "name": "Delete user",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/users/:id",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "admin", "users", ":id"],
+              "variable": [{ "key": "id", "value": "1" }]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deleteType\": \"SOFT\",\n  \"reason\": \"Demande RGPD de l'utilisateur\",\n  \"anonymize\": false\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin — Analytics",
+      "item": [
+        {
+          "name": "Overview (KPI)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/admin/overview",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "analytics", "admin", "overview"],
+              "query": [
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true },
+                { "key": "compareWithPrevious", "value": "true", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Sales analysis",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/admin/sales?groupBy=day",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "analytics", "admin", "sales"],
+              "query": [
+                { "key": "groupBy", "value": "day", "description": "day | week | month | year" },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true },
+                { "key": "includeRefunds", "value": "false", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Products analysis",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/admin/products?limit=10&sortBy=revenue",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "analytics", "admin", "products"],
+              "query": [
+                { "key": "limit", "value": "10" },
+                { "key": "sortBy", "value": "revenue", "description": "revenue | quantity | views | conversionRate" },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true },
+                { "key": "categoryId", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Customers analysis",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/admin/customers?limit=10&segment=all",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "analytics", "admin", "customers"],
+              "query": [
+                { "key": "limit", "value": "10" },
+                { "key": "segment", "value": "all", "description": "all | new | returning | vip | inactive" },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Export report",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/admin/export?reportType=sales&format=csv",
+              "host": ["{{baseUrl}}"], "path": ["api", "v1", "analytics", "admin", "export"],
+              "query": [
+                { "key": "reportType", "value": "sales", "description": "overview | sales | products | customers" },
+                { "key": "format", "value": "csv", "description": "csv | json | xlsx" },
+                { "key": "startDate", "value": "", "disabled": true },
+                { "key": "endDate", "value": "", "disabled": true },
+                { "key": "groupBy", "value": "", "disabled": true, "description": "day | week | month" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tests — Image Lifecycle",
+      "description": "Teste toute la vie d'une image : upload → lecture → association produit → réordonnancement → suppression image produit → suppression fichier → vérification 404.\n\nPré-requis : être connecté (accessToken valide) et avoir un categoryId valide dans le body de l'étape 3.",
+      "item": [
+        {
+          "name": "1. Upload image",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Réponse success = true', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('Champ ref présent', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data).to.have.property('ref');",
+                  "  pm.expect(json.data.ref).to.be.a('string').and.not.empty;",
+                  "});",
+                  "",
+                  "pm.test('Champ url présent et commence par /api/v1/media/', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data.url).to.include('/api/v1/media/');",
+                  "});",
+                  "",
+                  "pm.test('Taille > 0', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data.size).to.be.above(0);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.ref) {",
+                  "  pm.collectionVariables.set('mediaRef', json.data.ref);",
+                  "  console.log('mediaRef enregistré :', json.data.ref);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/media/upload", "host": ["{{baseUrl}}"], "path": ["api", "v1", "media", "upload"] },
+            "body": {
+              "mode": "formdata",
+              "formdata": [{ "key": "file", "type": "file", "src": "", "description": "Sélectionner une image JPEG/PNG/WEBP (<10MB)" }]
+            }
+          }
+        },
+        {
+          "name": "2. Lire le fichier uploadé",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var ref = pm.collectionVariables.get('mediaRef');",
+                  "if (!ref) {",
+                  "  throw new Error('mediaRef vide — exécutez d abord l étape 1 (Upload image)');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Content-Type est une image', function () {",
+                  "  var ct = pm.response.headers.get('Content-Type');",
+                  "  pm.expect(ct).to.include('image/');",
+                  "});",
+                  "",
+                  "pm.test('Cache-Control présent (1 an)', function () {",
+                  "  var cc = pm.response.headers.get('Cache-Control');",
+                  "  pm.expect(cc).to.include('max-age=31536000');",
+                  "});",
+                  "",
+                  "pm.test('Corps non vide', function () {",
+                  "  pm.expect(pm.response.responseSize).to.be.above(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/media/{{mediaRef}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "media", "{{mediaRef}}"]
+            }
+          }
+        },
+        {
+          "name": "3. Créer un produit de test",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var ref = pm.collectionVariables.get('mediaRef');",
+                  "if (!ref) {",
+                  "  throw new Error('mediaRef vide — exécutez d abord l étape 1');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Réponse success = true', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('Produit créé avec un id', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data).to.have.property('id');",
+                  "  pm.expect(json.data.id).to.be.a('string').and.not.empty;",
+                  "});",
+                  "",
+                  "pm.test('mainImageRef absent (on le sette après)', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data.mainImageRef).to.be.null;",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.id) {",
+                  "  pm.collectionVariables.set('testProductId', json.data.id);",
+                  "  console.log('testProductId enregistré :', json.data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": { "raw": "{{baseUrl}}/api/v1/products/admin", "host": ["{{baseUrl}}"], "path": ["api", "v1", "products", "admin"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Produit test image lifecycle\",\n  \"slug\": \"produit-test-image-lifecycle\",\n  \"categoryId\": \"00000000-0000-0000-0000-000000000000\",\n  \"priceHt\": 9.99,\n  \"vatRate\": 20,\n  \"stock\": 1,\n  \"status\": \"draft\",\n  \"mainImageRef\": null\n}"
+            }
+          }
+        },
+        {
+          "name": "4. Associer l'image au produit",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var ref = pm.collectionVariables.get('mediaRef');",
+                  "var productId = pm.collectionVariables.get('testProductId');",
+                  "if (!ref) throw new Error('mediaRef vide — exécutez l étape 1');",
+                  "if (!productId) throw new Error('testProductId vide — exécutez l étape 3');",
+                  "",
+                  "var body = JSON.parse(pm.request.body.raw);",
+                  "body.imageRefs = [ref];",
+                  "pm.request.body.raw = JSON.stringify(body);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test('Réponse success = true', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('Array d images retourné', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data).to.be.an('array').and.have.lengthOf.above(0);",
+                  "});",
+                  "",
+                  "pm.test('imageRef correspond au fichier uploadé', function () {",
+                  "  var json = pm.response.json();",
+                  "  var ref = pm.collectionVariables.get('mediaRef');",
+                  "  pm.expect(json.data[0].imageRef).to.equal(ref);",
+                  "});",
+                  "",
+                  "pm.test('Image a un id UUID', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data[0].id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data[0] && json.data[0].id) {",
+                  "  pm.collectionVariables.set('testImageId', json.data[0].id);",
+                  "  console.log('testImageId enregistré :', json.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/{{testProductId}}/images",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "admin", "{{testProductId}}", "images"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageRefs\": [\"__sera_remplacé_par_le_prerequest__\"]\n}"
+            }
+          }
+        },
+        {
+          "name": "5. Vérifier la liste des images du produit",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (!pm.collectionVariables.get('testProductId')) {",
+                  "  throw new Error('testProductId vide — exécutez l étape 3');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Le produit a bien une image associée', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data.images).to.be.an('array').and.have.lengthOf.above(0);",
+                  "});",
+                  "",
+                  "pm.test('L image a displayOrder = 0', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data.images[0].displayOrder).to.equal(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/{{testProductId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "admin", "{{testProductId}}"]
+            }
+          }
+        },
+        {
+          "name": "6. Réordonner les images",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "var imageId = pm.collectionVariables.get('testImageId');",
+                  "if (!imageId) throw new Error('testImageId vide — exécutez l étape 4');",
+                  "",
+                  "var body = { imageIds: [imageId] };",
+                  "pm.request.body.raw = JSON.stringify(body);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Réponse success = true', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.be.true;",
+                  "});",
+                  "",
+                  "pm.test('Array d images retourné après réordonnancement', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{accessToken}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/{{testProductId}}/images/reorder",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "admin", "{{testProductId}}", "images", "reorder"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"imageIds\": [\"__sera_remplacé_par_le_prerequest__\"]\n}"
+            }
+          }
+        },
+        {
+          "name": "7. Dissocier l'image du produit",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (!pm.collectionVariables.get('testProductId')) throw new Error('testProductId vide — exécutez l étape 3');",
+                  "if (!pm.collectionVariables.get('testImageId')) throw new Error('testImageId vide — exécutez l étape 4');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Réponse success = true', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/{{testProductId}}/images/{{testImageId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "admin", "{{testProductId}}", "images", "{{testImageId}}"]
+            }
+          }
+        },
+        {
+          "name": "8. Vérifier que le produit n'a plus d'image",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Le produit n a plus d images', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.data.images).to.be.an('array').and.have.lengthOf(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/{{testProductId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "admin", "{{testProductId}}"]
+            }
+          }
+        },
+        {
+          "name": "9. Supprimer le produit de test",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Réponse success = true', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/products/admin/{{testProductId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "products", "admin", "{{testProductId}}"]
+            }
+          }
+        },
+        {
+          "name": "10. Supprimer le fichier media",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  "if (!pm.collectionVariables.get('mediaRef')) {",
+                  "  throw new Error('mediaRef vide — exécutez l étape 1');",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Réponse success = true', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{accessToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/media/{{mediaRef}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "media", "{{mediaRef}}"]
+            }
+          }
+        },
+        {
+          "name": "11. Vérifier que le fichier est bien supprimé (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404 — fichier introuvable', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test('Code d erreur FILE_NOT_FOUND', function () {",
+                  "  var json = pm.response.json();",
+                  "  pm.expect(json.success).to.be.false;",
+                  "  pm.expect(json.error.code).to.equal('FILE_NOT_FOUND');",
+                  "});",
+                  "",
+                  "pm.collectionVariables.set('mediaRef', '');",
+                  "pm.collectionVariables.set('testProductId', '');",
+                  "pm.collectionVariables.set('testImageId', '');",
+                  "console.log('Variables de test nettoyées.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/media/{{mediaRef}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "media", "{{mediaRef}}"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
-import { User, AuthResponse } from '@/lib/api/types';
+import { User, AuthResponse, isTwoFaRequiredResponse } from '@/lib/api/types';
 import { authApi } from '@/lib/api/authApi';
 import { usersApi } from '@/lib/api/usersApi';
 import { storageManager } from '@/lib/storageManager';
@@ -58,12 +58,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const authResponse: AuthResponse = await authApi.login({ email, password });
-      
+      const response = await authApi.login({ email, password });
+      if (isTwoFaRequiredResponse(response)) {
+        throw new Error('2FA requis : utilisez le formulaire de login admin.');
+      }
+      const authResponse: AuthResponse = response;
+
       // Stocker les tokens
       storageManager.token.setAccessToken(authResponse.accessToken);
       storageManager.token.setRefreshToken(authResponse.refreshToken);
-      
+
       // Stocker l'user
       setUser(authResponse.user);
       storageManager.user.setUser(authResponse.user);

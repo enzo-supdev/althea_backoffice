@@ -2,43 +2,35 @@
 
 import React, { createContext, useContext, ReactNode } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import type { User, LoginRequest, RegisterRequest } from '@/lib/api/types';
+import type {
+  AuthResponse,
+  LoginRequest,
+  LoginResponse,
+  RegisterRequest,
+  User,
+} from '@/lib/api/types';
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   loading: boolean;
   error: string | null;
-  login: (data: LoginRequest) => Promise<any>;
-  register: (data: RegisterRequest) => Promise<any>;
+  login: (data: LoginRequest) => Promise<LoginResponse | undefined>;
+  completeTwoFaLogin: (tempToken: string, code: string) => Promise<AuthResponse>;
+  register: (data: RegisterRequest) => Promise<AuthResponse | undefined>;
   logout: () => void;
   clearError: () => void;
+  updateUser: (updater: (prev: User) => User) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-/**
- * Provider pour l'authentification globale
- * À utiliser au niveau du layout root
- * 
- * @example
- * <AuthProvider>
- *   <YourApp />
- * </AuthProvider>
- */
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const auth = useAuth();
 
   return <AuthContext.Provider value={auth}>{children}</AuthContext.Provider>;
 };
 
-/**
- * Hook pour accéder au contexte d'authentification
- * Doit être utilisé à l'intérieur d'un <AuthProvider>
- * 
- * @example
- * const { user, login, logout } = useAuthContext();
- */
 export const useAuthContext = (): AuthContextType => {
   const context = useContext(AuthContext);
   if (!context) {

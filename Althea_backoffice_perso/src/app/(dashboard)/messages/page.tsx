@@ -11,8 +11,9 @@ import { useToast } from '@/components/ui/ToastProvider'
 import FormField from '@/components/ui/form/FormField'
 import { Message } from '@/types'
 import { formatDateTime } from '@/lib/utils'
-import { ApiError, messagesApi } from '@/lib/api'
+import { ApiError, chatbotApi, messagesApi } from '@/lib/api'
 import PageHeader from '@/components/layout/PageHeader'
+import ContactStatsBanner from '@/components/analytics/ContactStatsBanner'
 
 const replySchema = z.object({
   reply: z.string().trim().min(1, 'La reponse est obligatoire.').max(2000, 'La reponse depasse 2000 caracteres.'),
@@ -24,24 +25,11 @@ type ChatbotConversation = {
   id: string
   userLabel: string
   startedAt: Date
-  status: 'open' | 'resolved'
+  status: 'open' | 'resolved' | 'escalated'
+  messageCount: number
+  assignedTo?: string | null
   messages: Array<{ role: 'user' | 'bot'; content: string; createdAt: Date }>
 }
-
-const CHATBOT_HISTORY_STORAGE_KEY = 'althea.chatbot.history'
-
-const fallbackChatbotConversations: ChatbotConversation[] = [
-  {
-    id: 'cb-1',
-    userLabel: 'Visiteur #1042',
-    startedAt: new Date(),
-    status: 'resolved',
-    messages: [
-      { role: 'user', content: 'Quel est le delai de livraison ?', createdAt: new Date() },
-      { role: 'bot', content: 'Le delai moyen est de 48 a 72h selon la zone.', createdAt: new Date() },
-    ],
-  },
-]
 
 export default function MessagesPage() {
   const [messages, setMessages] = useState<Message[]>([])
@@ -50,8 +38,13 @@ export default function MessagesPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [filterStatus, setFilterStatus] = useState('all')
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null)
+  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null)
   const [chatbotConversations, setChatbotConversations] = useState<ChatbotConversation[]>([])
+  const [chatbotLoading, setChatbotLoading] = useState(true)
+  const [chatbotError, setChatbotError] = useState('')
+  const [chatbotActionLoading, setChatbotActionLoading] = useState(false)
   const [selectedChatbotId, setSelectedChatbotId] = useState<string | null>(null)
+  const [selectedChatbotConversation, setSelectedChatbotConversation] = useState<ChatbotConversation | null>(null)
   const { pushToast } = useToast()
 
   const replyForm = useForm<ReplyFormValues>({
@@ -63,9 +56,14 @@ export default function MessagesPage() {
 
   const replyDraft = replyForm.watch('reply')
 
-  const updateMessageInState = (messageId: string, nextMessage: Message) => {
+  const updateMessageInState = (messageId: string, nextMessage: Partial<Message>) => {
     setMessages((currentMessages) =>
-      currentMessages.map((item) => (item.id === messageId ? nextMessage : item))
+      currentMessages.map((item) =>
+        item.id === messageId ? { ...item, ...nextMessage, id: item.id } : item
+      )
+    )
+    setSelectedMessage((current) =>
+      current && current.id === messageId ? { ...current, ...nextMessage, id: current.id } : current
     )
   }
 
@@ -83,6 +81,7 @@ export default function MessagesPage() {
 
       setMessages(response.data)
       setSelectedMessageId((currentSelectedId) => currentSelectedId ?? response.data[0]?.id ?? null)
+      setSelectedMessage((current) => current ?? response.data[0] ?? null)
     } catch (error) {
       setLoadError('La messagerie est indisponible.')
       pushToast({
@@ -95,42 +94,83 @@ export default function MessagesPage() {
     }
   }, [pushToast])
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-
-    const raw = window.localStorage.getItem(CHATBOT_HISTORY_STORAGE_KEY)
-    if (!raw) {
-      setChatbotConversations(fallbackChatbotConversations)
-      setSelectedChatbotId(fallbackChatbotConversations[0]?.id ?? null)
-      return
-    }
+  const loadChatbotConversations = useCallback(async () => {
+    setChatbotError('')
+    setChatbotLoading(true)
 
     try {
-      const parsed = JSON.parse(raw) as Array<{
-        id: string
-        userLabel: string
-        startedAt: string
-        status: 'open' | 'resolved'
-        messages: Array<{ role: 'user' | 'bot'; content: string; createdAt: string }>
-      }>
+      const sessions = await chatbotApi.listAdminSessions({
+        page: 1,
+        limit: 50,
+      })
 
-      const normalized = parsed.map((conversation) => ({
-        ...conversation,
-        startedAt: new Date(conversation.startedAt),
-        messages: conversation.messages.map((item) => ({ ...item, createdAt: new Date(item.createdAt) })),
+      const withMessages = sessions.map((session) => ({
+        ...session,
+        messages: [] as ChatbotConversation['messages'],
       }))
-
-      setChatbotConversations(normalized)
-      setSelectedChatbotId(normalized[0]?.id ?? null)
-    } catch {
-      setChatbotConversations(fallbackChatbotConversations)
-      setSelectedChatbotId(fallbackChatbotConversations[0]?.id ?? null)
+      setChatbotConversations(withMessages)
+      setSelectedChatbotId((currentSelectedId) => currentSelectedId ?? withMessages[0]?.id ?? null)
+      setSelectedChatbotConversation((current) => current ?? withMessages[0] ?? null)
+    } catch (error) {
+      setChatbotConversations([])
+      setChatbotError('Historique chatbot indisponible.')
+      pushToast({
+        type: 'error',
+        title: 'Chargement chatbot impossible',
+        message: error instanceof ApiError ? error.message : 'Les sessions chatbot n\'ont pas pu etre chargees.',
+      })
+    } finally {
+      setChatbotLoading(false)
     }
-  }, [])
+  }, [pushToast])
+
+  const loadChatbotMessages = useCallback(async (sessionId: string) => {
+    try {
+      const messages = await chatbotApi.getSessionMessages(sessionId)
+
+      setChatbotConversations((currentConversations) =>
+        currentConversations.map((conversation) =>
+          conversation.id === sessionId
+            ? {
+                ...conversation,
+                messages,
+                messageCount: Math.max(conversation.messageCount, messages.length),
+              }
+            : conversation
+        )
+      )
+      setSelectedChatbotConversation((current) =>
+        current && current.id === sessionId
+          ? {
+              ...current,
+              messages,
+              messageCount: Math.max(current.messageCount, messages.length),
+            }
+          : current
+      )
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Historique indisponible',
+        message: error instanceof ApiError ? error.message : 'Le detail de la conversation est indisponible.',
+      })
+    }
+  }, [pushToast])
 
   useEffect(() => {
     void loadMessages()
   }, [loadMessages])
+
+  useEffect(() => {
+    void loadChatbotConversations()
+  }, [loadChatbotConversations])
+
+  useEffect(() => {
+    if (!selectedChatbotConversation) return
+    if (selectedChatbotConversation.messages.length > 0) return
+
+    void loadChatbotMessages(selectedChatbotConversation.id)
+  }, [selectedChatbotConversation, loadChatbotMessages])
 
   const retryLoadMessages = () => {
     void loadMessages().catch((error) => {
@@ -143,15 +183,21 @@ export default function MessagesPage() {
     })
   }
 
-  const selectedMessage = useMemo(
-    () => messages.find((message) => message.id === selectedMessageId) ?? null,
-    [messages, selectedMessageId]
-  )
+  const retryLoadChatbot = () => {
+    void loadChatbotConversations()
+  }
 
-  const selectedChatbotConversation = useMemo(
-    () => chatbotConversations.find((conversation) => conversation.id === selectedChatbotId) ?? null,
-    [chatbotConversations, selectedChatbotId],
-  )
+  const getChatbotStatusBadge = (status: ChatbotConversation['status']) => {
+    if (status === 'escalated') {
+      return { variant: 'warning' as const, label: 'Escaladee' }
+    }
+
+    if (status === 'resolved') {
+      return { variant: 'success' as const, label: 'Resolue' }
+    }
+
+    return { variant: 'default' as const, label: 'Ouverte' }
+  }
 
   const filteredMessages = useMemo(() => {
     const query = searchQuery.toLowerCase().trim()
@@ -190,15 +236,16 @@ export default function MessagesPage() {
 
   const handleSelectMessage = async (message: Message) => {
     setSelectedMessageId(message.id)
+    setSelectedMessage(message)
     replyForm.reset({ reply: '' })
 
     if (message.status === 'unread') {
+      updateMessageInState(message.id, { status: 'read' })
+
       try {
-        const updatedMessage = await messagesApi.updateContactMessageStatus(message.id, {
-          status: 'read',
-        })
-        updateMessageInState(message.id, updatedMessage)
+        await messagesApi.updateContactMessageStatus(message.id, { status: 'read' })
       } catch (error) {
+        updateMessageInState(message.id, { status: 'unread' })
         pushToast({
           type: 'error',
           title: 'Marquage impossible',
@@ -211,17 +258,14 @@ export default function MessagesPage() {
   const markSelectedAsRead = async () => {
     if (!selectedMessageId) return
 
-    try {
-      const updatedMessage = await messagesApi.updateContactMessageStatus(selectedMessageId, {
-        status: 'read',
-      })
-      updateMessageInState(selectedMessageId, updatedMessage)
+    const previousStatus = selectedMessage?.status ?? 'unread'
+    updateMessageInState(selectedMessageId, { status: 'read' })
 
-      pushToast({
-        type: 'info',
-        title: 'Message marque comme lu',
-      })
+    try {
+      await messagesApi.updateContactMessageStatus(selectedMessageId, { status: 'read' })
+      pushToast({ type: 'info', title: 'Message marque comme lu' })
     } catch (error) {
+      updateMessageInState(selectedMessageId, { status: previousStatus })
       pushToast({
         type: 'error',
         title: 'Marquage impossible',
@@ -234,20 +278,35 @@ export default function MessagesPage() {
     if (!selectedMessageId || !selectedMessage || selectedMessage.status === 'closed') return
 
     const replyMessage = values.reply.trim()
+    const previousStatus = selectedMessage.status
+    const previousReplies = selectedMessage.replies
+
+    const optimisticReply = {
+      id: `${selectedMessageId}-local-${Date.now()}`,
+      author: 'Support',
+      message: replyMessage,
+      createdAt: new Date(),
+    }
+
+    updateMessageInState(selectedMessageId, {
+      status: 'replied',
+      replies: [...previousReplies, optimisticReply],
+    })
+    replyForm.reset({ reply: '' })
 
     try {
-      const updatedMessage = await messagesApi.replyContactMessage(selectedMessageId, {
-        reply: replyMessage,
-      })
-      updateMessageInState(selectedMessageId, updatedMessage)
-      replyForm.reset({ reply: '' })
-
+      await messagesApi.replyContactMessage(selectedMessageId, { reply: replyMessage })
       pushToast({
         type: 'success',
         title: 'Reponse envoyee',
         message: 'Le message a ete passe en repondu.',
       })
     } catch (error) {
+      updateMessageInState(selectedMessageId, {
+        status: previousStatus,
+        replies: previousReplies,
+      })
+      replyForm.reset({ reply: replyMessage })
       pushToast({
         type: 'error',
         title: 'Reponse impossible',
@@ -259,18 +318,18 @@ export default function MessagesPage() {
   const closeSelected = async () => {
     if (!selectedMessageId) return
 
-    try {
-      const updatedMessage = await messagesApi.updateContactMessageStatus(selectedMessageId, {
-        status: 'processed',
-      })
-      updateMessageInState(selectedMessageId, updatedMessage)
+    const previousStatus = selectedMessage?.status ?? 'read'
+    updateMessageInState(selectedMessageId, { status: 'closed' })
 
+    try {
+      await messagesApi.updateContactMessageStatus(selectedMessageId, { status: 'closed' })
       pushToast({
         type: 'success',
         title: 'Conversation close',
         message: 'Le ticket support a ete archive sur le serveur.',
       })
     } catch (error) {
+      updateMessageInState(selectedMessageId, { status: previousStatus })
       pushToast({
         type: 'error',
         title: 'Fermeture impossible',
@@ -282,22 +341,77 @@ export default function MessagesPage() {
   const reopenSelected = async () => {
     if (!selectedMessageId) return
 
-    try {
-      const updatedMessage = await messagesApi.updateContactMessageStatus(selectedMessageId, {
-        status: 'read',
-      })
-      updateMessageInState(selectedMessageId, updatedMessage)
+    const previousStatus = selectedMessage?.status ?? 'closed'
+    updateMessageInState(selectedMessageId, { status: 'read' })
 
-      pushToast({
-        type: 'info',
-        title: 'Conversation rouverte',
-      })
+    try {
+      await messagesApi.updateContactMessageStatus(selectedMessageId, { status: 'read' })
+      pushToast({ type: 'info', title: 'Conversation rouverte' })
     } catch (error) {
+      updateMessageInState(selectedMessageId, { status: previousStatus })
       pushToast({
         type: 'error',
         title: 'Reouverture impossible',
         message: error instanceof ApiError ? error.message : 'La reouverture a echoue.',
       })
+    }
+  }
+
+  const escalateSelectedChatbot = async () => {
+    if (!selectedChatbotConversation || selectedChatbotConversation.status === 'escalated') return
+
+    const sessionId = selectedChatbotConversation.id
+    const previousStatus = selectedChatbotConversation.status
+    const previousAssignedTo = selectedChatbotConversation.assignedTo ?? null
+
+    // Optimistic : on passe en `escalated` localement pour que le panneau reste cohérent.
+    setChatbotConversations((currentConversations) =>
+      currentConversations.map((conversation) =>
+        conversation.id === sessionId ? { ...conversation, status: 'escalated' } : conversation
+      )
+    )
+    setSelectedChatbotConversation((current) =>
+      current && current.id === sessionId ? { ...current, status: 'escalated' } : current
+    )
+
+    setChatbotActionLoading(true)
+    try {
+      const updated = await chatbotApi.escalateSession(sessionId)
+
+      setChatbotConversations((currentConversations) =>
+        currentConversations.map((conversation) =>
+          conversation.id === sessionId
+            ? { ...conversation, status: updated.status, assignedTo: updated.assignedTo }
+            : conversation
+        )
+      )
+      setSelectedChatbotConversation((current) =>
+        current && current.id === sessionId
+          ? { ...current, status: updated.status, assignedTo: updated.assignedTo }
+          : current
+      )
+
+      pushToast({ type: 'success', title: 'Session chatbot escaladee' })
+    } catch (error) {
+      setChatbotConversations((currentConversations) =>
+        currentConversations.map((conversation) =>
+          conversation.id === sessionId
+            ? { ...conversation, status: previousStatus, assignedTo: previousAssignedTo }
+            : conversation
+        )
+      )
+      setSelectedChatbotConversation((current) =>
+        current && current.id === sessionId
+          ? { ...current, status: previousStatus, assignedTo: previousAssignedTo }
+          : current
+      )
+      pushToast({
+        type: 'error',
+        title: 'Escalade impossible',
+        message: error instanceof ApiError ? error.message : 'La session chatbot n\'a pas pu etre escaladee.',
+      })
+    } finally {
+      setChatbotActionLoading(false)
     }
   }
 
@@ -329,6 +443,8 @@ export default function MessagesPage() {
         description={`${filteredMessages.length} message${filteredMessages.length > 1 ? 's' : ''} à traiter.`}
       />
 
+      <ContactStatsBanner days={30} />
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div className="app-panel p-4">
           <p className="text-sm text-gray-500">Messages non lus</p>
@@ -355,6 +471,7 @@ export default function MessagesPage() {
             onChange={(value) => {
               setSearchQuery(value)
               setSelectedMessageId(null)
+              setSelectedMessage(null)
               replyForm.reset({ reply: '' })
             }}
             placeholder="Rechercher un message..."
@@ -365,6 +482,7 @@ export default function MessagesPage() {
             onChange={(e) => {
               setFilterStatus(e.target.value)
               setSelectedMessageId(null)
+              setSelectedMessage(null)
               replyForm.reset({ reply: '' })
             }}
             className="input-base bg-shell-surface"
@@ -573,7 +691,20 @@ export default function MessagesPage() {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            {chatbotError ? (
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <p className="text-sm text-gray-600">{chatbotError}</p>
+                <button type="button" onClick={retryLoadChatbot} className="btn-primary mt-3">
+                  Reessayer
+                </button>
+              </div>
+            ) : chatbotLoading ? (
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="h-4 w-1/3 animate-pulse rounded bg-gray-200" />
+                <div className="mt-3 h-24 animate-pulse rounded bg-gray-100" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className="rounded-xl border border-gray-200 bg-white">
                 {chatbotConversations.length === 0 ? (
                   <p className="p-4 text-sm text-gray-500">Aucun historique chatbot.</p>
@@ -583,13 +714,16 @@ export default function MessagesPage() {
                       <li key={conversation.id}>
                         <button
                           type="button"
-                          onClick={() => setSelectedChatbotId(conversation.id)}
+                          onClick={() => {
+                            setSelectedChatbotId(conversation.id)
+                            setSelectedChatbotConversation(conversation)
+                          }}
                           className={`w-full px-4 py-3 text-left transition-colors ${selectedChatbotId === conversation.id ? 'bg-primary-light/50' : 'hover:bg-gray-50'}`}
                         >
                           <p className="text-sm font-medium text-dark">{conversation.userLabel}</p>
                           <p className="text-xs text-gray-500">{formatDateTime(conversation.startedAt)}</p>
-                          <Badge variant={conversation.status === 'resolved' ? 'success' : 'warning'}>
-                            {conversation.status === 'resolved' ? 'Resolue' : 'Ouverte'}
+                          <Badge variant={getChatbotStatusBadge(conversation.status).variant}>
+                            {getChatbotStatusBadge(conversation.status).label}
                           </Badge>
                         </button>
                       </li>
@@ -603,6 +737,32 @@ export default function MessagesPage() {
                   <p className="text-sm text-gray-500">Selectionnez une conversation chatbot.</p>
                 ) : (
                   <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                      <div>
+                        <p className="text-sm font-medium text-dark">{selectedChatbotConversation.userLabel}</p>
+                        <p className="text-xs text-gray-500">
+                          {selectedChatbotConversation.messageCount} message{selectedChatbotConversation.messageCount > 1 ? 's' : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={getChatbotStatusBadge(selectedChatbotConversation.status).variant}>
+                          {getChatbotStatusBadge(selectedChatbotConversation.status).label}
+                        </Badge>
+                        <button
+                          type="button"
+                          onClick={escalateSelectedChatbot}
+                          disabled={chatbotActionLoading || selectedChatbotConversation.status === 'escalated'}
+                          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {chatbotActionLoading ? 'Escalade...' : 'Escalader'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {selectedChatbotConversation.messages.length === 0 ? (
+                      <p className="text-sm text-gray-500">Aucun message dans cette session.</p>
+                    ) : (
+                      <>
                     {selectedChatbotConversation.messages.map((item, index) => (
                       <div
                         key={`${selectedChatbotConversation.id}-${index}`}
@@ -615,10 +775,13 @@ export default function MessagesPage() {
                         <p className="mt-2 text-[11px] text-gray-500">{formatDateTime(item.createdAt)}</p>
                       </div>
                     ))}
+                      </>
+                    )}
                   </div>
                 )}
               </div>
             </div>
+            )}
           </div>
         </div>
       )}

@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { Plus, Eye } from 'lucide-react'
+import { Plus, Eye, FileText } from 'lucide-react'
 import DataTable, { Column } from '@/components/ui/DataTable'
 import Pagination from '@/components/ui/Pagination'
 import SearchBar from '@/components/ui/SearchBar'
@@ -12,8 +12,27 @@ import Modal from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/ToastProvider'
 import { Order } from '@/types'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
-import { ApiError, ordersApi } from '@/lib/api'
+import { ApiError, invoicesApi, ordersApi } from '@/lib/api'
 import PageHeader from '@/components/layout/PageHeader'
+import ExportButton from '@/components/ui/ExportButton'
+
+async function fetchAllInvoiceOrderIds(): Promise<Set<string>> {
+  const orderIds = new Set<string>()
+  const limit = 100
+  let page = 1
+  for (let guard = 0; guard < 20; guard += 1) {
+    const res = await invoicesApi.list({ page, limit })
+    res.data.forEach((inv: any) => {
+      if (inv.orderId) orderIds.add(String(inv.orderId))
+      if (inv.order?.id) orderIds.add(String(inv.order.id))
+    })
+    const total = res.meta?.total ?? res.data.length
+    const totalPages = res.meta?.totalPages ?? Math.ceil(total / limit)
+    if (!res.data.length || page >= totalPages) break
+    page += 1
+  }
+  return orderIds
+}
 
 export default function OrdersPage() {
   const searchParams = useSearchParams()
@@ -30,6 +49,8 @@ export default function OrdersPage() {
   const [selectedOrders, setSelectedOrders] = useState<string[]>([])
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([])
+  const [invoiceOrderIds, setInvoiceOrderIds] = useState<Set<string>>(new Set())
+  const [isGeneratingInvoices, setIsGeneratingInvoices] = useState(false)
   const { pushToast } = useToast()
 
   useEffect(() => {
@@ -72,6 +93,58 @@ export default function OrdersPage() {
       isMounted = false
     }
   }, [pushToast])
+
+  const refreshInvoiceMap = useCallback(async () => {
+    try {
+      const ids = await fetchAllInvoiceOrderIds()
+      setInvoiceOrderIds(ids)
+    } catch (error) {
+      console.warn('[orders] refreshInvoiceMap failed:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (orders.length === 0) return
+    void refreshInvoiceMap()
+  }, [orders, refreshInvoiceMap])
+
+  const ordersWithoutInvoice = useMemo(
+    () => orders.filter((order) => !invoiceOrderIds.has(String(order.id))),
+    [orders, invoiceOrderIds],
+  )
+
+  const handleGenerateMissingInvoices = async () => {
+    if (ordersWithoutInvoice.length === 0) return
+
+    setIsGeneratingInvoices(true)
+    let generated = 0
+    let failed = 0
+
+    for (const order of ordersWithoutInvoice) {
+      try {
+        const invoice = await invoicesApi.ensureInvoiceForOrder(
+          order.id,
+          order.orderNumber,
+          { lookupFirst: false },
+        )
+        if (invoice) generated += 1
+        else failed += 1
+      } catch {
+        failed += 1
+      }
+    }
+
+    await refreshInvoiceMap()
+    setIsGeneratingInvoices(false)
+
+    pushToast({
+      type: generated > 0 ? 'success' : 'error',
+      title: 'Génération factures',
+      message:
+        `${generated} facture${generated > 1 ? 's' : ''} générée${generated > 1 ? 's' : ''}` +
+        (failed > 0 ? `, ${failed} échec${failed > 1 ? 's' : ''}.` : '.'),
+    })
+  }
 
   const persistOrders = async (nextOrders: Order[]) => {
     setOrders(nextOrders)
@@ -395,10 +468,30 @@ export default function OrdersPage() {
         title="Gestion des commandes"
         description={`${filteredOrders.length} commande${filteredOrders.length > 1 ? 's' : ''} à suivre.`}
         actions={(
-          <Link href="/orders/new" className="btn-primary inline-flex items-center gap-2">
-            <Plus className="h-5 w-5" />
-            Nouvelle commande
-          </Link>
+          <>
+            {ordersWithoutInvoice.length > 0 && (
+              <button
+                type="button"
+                onClick={handleGenerateMissingInvoices}
+                disabled={isGeneratingInvoices}
+                className="inline-flex items-center gap-2 rounded-lg border border-primary/20 px-4 py-2 text-sm font-medium text-dark transition-colors hover:bg-primary-light/40 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <FileText className="h-4 w-4" />
+                {isGeneratingInvoices
+                  ? `Génération... (${ordersWithoutInvoice.length})`
+                  : `Générer les factures manquantes (${ordersWithoutInvoice.length})`}
+              </button>
+            )}
+            <ExportButton
+              fetcher={() => ordersApi.exportAdmin()}
+              filename={`commandes-${new Date().toISOString().slice(0, 10)}.csv`}
+              label="Exporter CSV"
+            />
+            <Link href="/orders/new" className="btn-primary inline-flex items-center gap-2">
+              <Plus className="h-5 w-5" />
+              Nouvelle commande
+            </Link>
+          </>
         )}
       />
 

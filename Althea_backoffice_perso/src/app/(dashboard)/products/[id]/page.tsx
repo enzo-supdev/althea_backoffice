@@ -11,9 +11,17 @@ import FormActions from '@/components/ui/form/FormActions'
 import Badge from '@/components/ui/Badge'
 import ProductImageManager from '@/components/ui/ProductImageManager'
 import { useToast } from '@/components/ui/ToastProvider'
-import { ApiError, categoriesApi, productsApi } from '@/lib/api'
+import { ApiError, categoriesApi, productsApi, resolveMediaUrl } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Category, Product } from '@/types'
+import { Category, Product, ProductImage } from '@/types'
+
+const toSlug = (text: string) =>
+  text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
 
 type ProductEdition = {
   name: string
@@ -22,8 +30,7 @@ type ProductEdition = {
   tva: number
   stock: number
   categoryId: string
-  status: 'published' | 'draft'
-  images: string[]
+  status: 'published' | 'draft' | 'archived'
 }
 
 export default function ProductDetailPage() {
@@ -47,7 +54,6 @@ export default function ProductDetailPage() {
       stock: 0,
       categoryId: '',
       status: 'draft',
-      images: [],
     },
   })
 
@@ -58,29 +64,25 @@ export default function ProductDetailPage() {
       setIsLoading(true)
 
       try {
-        const [allProducts, allCategories] = await Promise.all([
-          productsApi.listBackoffice(),
+        const [productData, allCategories] = await Promise.all([
+          productsApi.getAdminById(params.id),
           categoriesApi.list(),
         ])
 
         if (!isMounted) return
 
-        const selectedProduct = allProducts.find((item) => item.id === params.id) ?? null
-        setProduct(selectedProduct)
+        setProduct(productData)
         setCategories(allCategories)
 
-        if (selectedProduct) {
-          form.reset({
-            name: selectedProduct.name,
-            description: selectedProduct.description,
-            priceHT: selectedProduct.priceHT,
-            tva: selectedProduct.tva,
-            stock: selectedProduct.stock,
-            categoryId: selectedProduct.category.id,
-            status: selectedProduct.status,
-            images: selectedProduct.images,
-          })
-        }
+        form.reset({
+          name: productData.name,
+          description: productData.description,
+          priceHT: productData.priceHT,
+          tva: productData.tva,
+          stock: productData.stock,
+          categoryId: productData.category.id,
+          status: productData.status,
+        })
       } catch (error) {
         if (!isMounted) return
         pushToast({
@@ -108,37 +110,40 @@ export default function ProductDetailPage() {
     return Number((priceHT * (1 + tva / 100)).toFixed(2))
   }, [form])
 
+  const handleImagesChange = (nextImages: ProductImage[]) => {
+    setProduct((prev) => prev ? { ...prev, images: nextImages } : prev)
+  }
+
+  const handleMainImageRefChange = (nextMainImageRef: string | null) => {
+    setProduct((prev) => prev ? { ...prev, mainImageRef: nextMainImageRef } : prev)
+  }
+
+  const heroImageUrl = useMemo(() => {
+    if (!product) return ''
+    if (product.mainImageRef) {
+      const matching = product.images.find((img) => img.imageRef === product.mainImageRef)
+      return matching?.url ?? resolveMediaUrl(product.mainImageRef)
+    }
+    return product.images[0]?.url ?? ''
+  }, [product])
+
   const handleSave = form.handleSubmit(async (values) => {
     if (!product) return
 
-    const category = categories.find((item) => item.id === values.categoryId)
-    if (!category) {
-      pushToast({ type: 'error', title: 'Categorie invalide' })
-      return
-    }
-
-    const updatedProduct: Product = {
-      ...product,
-      name: values.name,
-      description: values.description,
-      priceHT: values.priceHT,
-      tva: values.tva,
-      price: Number((values.priceHT * (1 + values.tva / 100)).toFixed(2)),
-      stock: values.stock,
-      status: values.status,
-      category,
-      images: values.images,
-      updatedAt: new Date(),
-    }
-
     try {
-      const allProducts = await productsApi.listBackoffice()
-      const nextProducts = allProducts.map((item) => (item.id === updatedProduct.id ? updatedProduct : item))
-      await productsApi.save(nextProducts)
-      setProduct(updatedProduct)
-
+      const updated = await productsApi.update(product.id, {
+        name: values.name.trim(),
+        slug: toSlug(values.name),
+        description: values.description.trim(),
+        priceHt: values.priceHT,
+        vatRate: values.tva,
+        stock: values.stock,
+        categoryId: values.categoryId,
+        status: values.status,
+      })
+      setProduct(updated)
       pushToast({ type: 'success', title: 'Produit mis a jour' })
-      router.push(`/products/${updatedProduct.id}`)
+      router.push(`/products/${product.id}`)
     } catch (error) {
       pushToast({
         type: 'error',
@@ -218,15 +223,22 @@ export default function ProductDetailPage() {
               <select id="product-status" className="input-base" {...form.register('status')}>
                 <option value="draft">Brouillon</option>
                 <option value="published">Publie</option>
+                <option value="archived">Archive</option>
               </select>
             </FormField>
           </div>
 
-          <FormField label="Image principale (URL)" htmlFor="product-image-url">
-            <div id="product-image-url">
-              <ProductImageManager images={form.watch('images') ?? []} onChange={(nextImages) => form.setValue('images', nextImages)} />
-            </div>
-          </FormField>
+          <div>
+            <p className="mb-2 text-sm font-medium text-gray-700">Images du produit</p>
+            <ProductImageManager
+              productId={params.id}
+              images={product.images}
+              mainImageRef={product.mainImageRef}
+              onImagesChange={handleImagesChange}
+              onMainImageRefChange={handleMainImageRefChange}
+              onError={(msg) => pushToast({ type: 'error', title: 'Erreur image', message: msg })}
+            />
+          </div>
 
           <FormActions>
             <Link href={`/products/${product.id}`} className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100">Annuler</Link>
@@ -236,8 +248,8 @@ export default function ProductDetailPage() {
       ) : (
         <div className="app-panel space-y-4 p-5 md:p-6">
           <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
-            {product.images[0] ? (
-              <Image src={product.images[0]} alt={product.name} width={1200} height={420} className="h-64 w-full object-cover" unoptimized />
+            {heroImageUrl ? (
+              <Image src={heroImageUrl} alt={product.name} width={1200} height={420} className="h-64 w-full object-cover" unoptimized />
             ) : (
               <div className="flex h-64 items-center justify-center text-gray-400">Aucune image</div>
             )}

@@ -1,11 +1,32 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 
-const API_BASE_URL = 'https://api-pslt.matheovieilleville.fr/api/v1';
+const DEFAULT_API_BASE_URL = 'https://api-pslt.matheovieilleville.fr/api/v1';
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
 
 const TOKEN_KEYS = {
   access: ['accessToken', 'althea_access_token'],
   refresh: ['refreshToken', 'althea_refresh_token'],
 } as const;
+
+const PUBLIC_AUTH_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/logout',
+  '/auth/refresh-token',
+  '/auth/forgot-password',
+  '/auth/resend-verification',
+  '/auth/reset-password',
+  '/auth/verify-email',
+  '/auth/2fa/verify',
+];
+
+function shouldSkipAuthHeader(url?: string): boolean {
+  if (!url) {
+    return false;
+  }
+
+  return PUBLIC_AUTH_PATHS.some((path) => url.includes(path));
+}
 
 function getToken(keys: readonly string[]): string | null {
   if (typeof window === 'undefined') {
@@ -55,6 +76,10 @@ export const axiosInstance: AxiosInstance = axios.create({
  */
 axiosInstance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    if (shouldSkipAuthHeader(config.url)) {
+      return config;
+    }
+
     const accessToken = getToken(TOKEN_KEYS.access);
     if (accessToken) {
       config.headers.Authorization = `Bearer ${accessToken}`;
@@ -77,7 +102,7 @@ axiosInstance.interceptors.response.use(
     const originalRequest = error.config;
 
     // Éviter boucles infinies
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !originalRequest._retry && !shouldSkipAuthHeader(originalRequest.url)) {
       originalRequest._retry = true;
 
       if (typeof window !== 'undefined') {
