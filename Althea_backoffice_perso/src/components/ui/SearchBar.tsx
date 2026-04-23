@@ -25,6 +25,8 @@ export default function SearchBar({
   }, [value])
 
   useEffect(() => {
+    if (draftValue === value) return
+
     if (debounceMs <= 0) {
       onChange(draftValue)
       return
@@ -35,7 +37,7 @@ export default function SearchBar({
     }, debounceMs)
 
     return () => window.clearTimeout(timeoutId)
-  }, [draftValue, debounceMs, onChange])
+  }, [draftValue, value, debounceMs, onChange])
 
   return (
     <div className="relative">

@@ -1,9 +1,10 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import axios from 'axios'
 import Image from 'next/image'
 import Link from 'next/link'
-import { Plus, Edit, Trash2, ChevronDown, ChevronUp, RefreshCcw } from 'lucide-react'
+import { Plus, Edit, Trash2, ChevronDown, ChevronUp, RefreshCcw, Upload, FileDown, Download } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -13,11 +14,41 @@ import SearchBar from '@/components/ui/SearchBar'
 import Badge from '@/components/ui/Badge'
 import Modal from '@/components/ui/Modal'
 import { useToast } from '@/components/ui/ToastProvider'
-import { ApiError, categoriesApi } from '@/lib/api'
+import { ApiError, categoriesApi, mediaApi } from '@/lib/api'
+import { buildCsv, downloadCsv, parseCsv, toSlug } from '@/lib/csv'
 import { Category } from '@/types'
 import PageHeader from '@/components/layout/PageHeader'
 import FormActions from '@/components/ui/form/FormActions'
 import FormField from '@/components/ui/form/FormField'
+
+type CategoryImportFailure = { row: number; name?: string; error: string; raw?: Record<string, string> }
+type CategoryImportResult = {
+  total: number
+  created: number
+  updated: number
+  failed: CategoryImportFailure[]
+}
+
+function isConflict409(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 409
+}
+
+const CATEGORY_CSV_COLUMNS = ['name', 'slug', 'description', 'imageUrl']
+
+const CATEGORY_CSV_EXAMPLE_ROWS: string[][] = [
+  [
+    'Stethoscopes',
+    'stethoscopes',
+    "Instruments d'auscultation cardiaque et pulmonaire",
+    'https://placehold.co/600x600/14413c/fff9f0.png?text=Stethoscopes',
+  ],
+  [
+    'Tensiometres',
+    'tensiometres',
+    'Appareils de mesure de la pression arterielle',
+    '',
+  ],
+]
 
 const categoryFormSchema = z.object({
   name: z.string().trim().min(1, 'Le nom est requis.'),
@@ -46,6 +77,11 @@ export default function CategoriesPage() {
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([])
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [draggingCategoryId, setDraggingCategoryId] = useState<string | null>(null)
+  const [isImporting, setIsImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null)
+  const [importResult, setImportResult] = useState<CategoryImportResult | null>(null)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const { pushToast } = useToast()
 
   const addCategoryForm = useForm<CategoryFormValues>({
@@ -395,6 +431,286 @@ export default function CategoriesPage() {
     setIsDeleteConfirmOpen(true)
   }
 
+  const handleDownloadTemplate = () => {
+    downloadCsv('categories-template.csv', buildCsv(CATEGORY_CSV_COLUMNS, CATEGORY_CSV_EXAMPLE_ROWS))
+  }
+
+  const handleExportCsv = () => {
+    const rows = categories.map((category) => [
+      category.name,
+      category.slug,
+      category.description,
+      category.image ?? '',
+    ])
+    downloadCsv(
+      `categories-${new Date().toISOString().slice(0, 10)}.csv`,
+      buildCsv(CATEGORY_CSV_COLUMNS, rows),
+    )
+  }
+
+  const handleOpenImportPicker = () => {
+    setImportResult(null)
+    setImportProgress(null)
+    fileInputRef.current?.click()
+  }
+
+  const runImport = async (file: File) => {
+    setIsImportModalOpen(true)
+    setIsImporting(true)
+    setImportResult(null)
+
+    let rows: Record<string, string>[] = []
+    try {
+      const text = await file.text()
+      rows = parseCsv(text)
+    } catch {
+      setIsImporting(false)
+      pushToast({
+        type: 'error',
+        title: 'Lecture CSV impossible',
+        message: 'Le fichier est vide ou illisible.',
+      })
+      setIsImportModalOpen(false)
+      return
+    }
+
+    if (rows.length === 0) {
+      setIsImporting(false)
+      setImportResult({ total: 0, created: 0, updated: 0, failed: [] })
+      return
+    }
+
+    const failed: CategoryImportFailure[] = []
+    let created = 0
+    let updated = 0
+
+    // Pre-charge la liste admin fraiche pour construire un cache slug -> id.
+    // Si une categorie est deja presente, on fait UPDATE direct sans tenter
+    // de create (evite les 409 inutiles et les re-fetch).
+    let existingBySlug = new Map<string, string>()
+    try {
+      const remote = await categoriesApi.listAdmin()
+      existingBySlug = new Map(remote.map((c) => [c.slug.toLowerCase(), c.id]))
+    } catch {
+      // On continue sans cache — chaque ligne retombera en fallback 409+refetch.
+    }
+
+    setImportProgress({ done: 0, total: rows.length })
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index]
+      const rowNumber = index + 2
+      try {
+        const name = row.name?.trim()
+        if (!name) throw new Error('Colonne "name" vide.')
+
+        const slug = (row.slug?.trim() || toSlug(name))
+        if (!/^[a-z0-9-]+$/.test(slug)) {
+          throw new Error(`slug invalide : "${slug}". Uniquement minuscules, chiffres, tirets.`)
+        }
+
+        const description = row.description?.trim() || ''
+
+        // On uploade l'image AVANT le create/update pour passer imageRef
+        // directement dans le payload (evite le POST /:id/image qui bogue).
+        let imageRef: string | undefined
+        const imageUrl = row.imageUrl?.trim()
+        if (imageUrl) {
+          try {
+            const uploaded = await mediaApi.uploadFromUrl(imageUrl, `${slug}.png`)
+            imageRef = uploaded.ref
+          } catch (imageError) {
+            const msg = imageError instanceof Error ? imageError.message : 'upload media echoue'
+            throw new Error(`Upload image "${imageUrl}" : ${msg}`)
+          }
+        }
+
+        const payload = {
+          name,
+          slug,
+          description,
+          ...(imageRef ? { imageRef } : {}),
+        }
+
+        // Strategie cache-first : si le slug existe deja en base, on UPDATE
+        // directement. Sinon on CREATE, avec fallback 409+refetch pour gerer
+        // les races (cache obsolete, creation concurrente, ...).
+        const cachedId = existingBySlug.get(slug.toLowerCase())
+        if (cachedId) {
+          await categoriesApi.update(cachedId, payload)
+          updated += 1
+        } else {
+          try {
+            const createdCat = await categoriesApi.create(payload)
+            existingBySlug.set(slug.toLowerCase(), createdCat.id)
+            created += 1
+          } catch (createError) {
+            if (!isConflict409(createError)) throw createError
+
+            // Cache obsolete : refetch, puis UPDATE.
+            const remote = await categoriesApi.listAdmin()
+            existingBySlug = new Map(remote.map((c) => [c.slug.toLowerCase(), c.id]))
+            const foundId = existingBySlug.get(slug.toLowerCase())
+            if (!foundId) {
+              throw new Error('Conflit 409 mais categorie introuvable apres refetch.')
+            }
+            await categoriesApi.update(foundId, payload)
+            updated += 1
+          }
+        }
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'Erreur inconnue.'
+        failed.push({ row: rowNumber, name: row.name, error: message, raw: row })
+      }
+
+      setImportProgress({ done: index + 1, total: rows.length })
+    }
+
+    const succeeded = created + updated
+
+    if (succeeded > 0) {
+      try {
+        await refreshCategories()
+      } catch {
+        // On laisse glisser : l'utilisateur verra les nouvelles categories au prochain refresh.
+      }
+    }
+
+    setImportResult({ total: rows.length, created, updated, failed })
+    setIsImporting(false)
+
+    if (failed.length === 0 && succeeded > 0) {
+      pushToast({
+        type: 'success',
+        title: 'Import termine',
+        message: `${created} creee${created > 1 ? 's' : ''}, ${updated} mise${updated > 1 ? 's' : ''} a jour.`,
+      })
+    } else if (succeeded > 0) {
+      pushToast({
+        type: 'info',
+        title: 'Import partiel',
+        message: `${created} creees, ${updated} mises a jour, ${failed.length} echec${failed.length > 1 ? 's' : ''}.`,
+      })
+    } else {
+      pushToast({
+        type: 'error',
+        title: 'Import echoue',
+        message: 'Aucune ligne n a pu etre importee.',
+      })
+    }
+  }
+
+  const handleImportFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    void runImport(file)
+  }
+
+  const retryFailedAsUpdate = async () => {
+    if (!importResult) return
+    const failedWithRaw = importResult.failed.filter((f) => f.raw)
+    if (failedWithRaw.length === 0) return
+
+    setIsImporting(true)
+    setImportProgress({ done: 0, total: failedWithRaw.length })
+
+    // Fresh cache pour matcher les slugs.
+    let categoryBySlug = new Map<string, string>()
+    try {
+      const remote = await categoriesApi.listAdmin()
+      categoryBySlug = new Map(remote.map((c) => [c.slug.toLowerCase(), c.id]))
+    } catch {
+      // On continue sans cache.
+    }
+
+    const stillFailed: CategoryImportFailure[] = []
+    let retryUpdated = 0
+
+    for (let i = 0; i < failedWithRaw.length; i++) {
+      const failure = failedWithRaw[i]
+      const row = failure.raw as Record<string, string>
+      try {
+        const name = row.name?.trim()
+        if (!name) throw new Error('Colonne "name" vide.')
+
+        const slug = (row.slug?.trim() || toSlug(name))
+        if (!/^[a-z0-9-]+$/.test(slug)) {
+          throw new Error(`slug invalide : "${slug}".`)
+        }
+
+        const existingId = categoryBySlug.get(slug.toLowerCase())
+        if (!existingId) {
+          throw new Error(`Aucune categorie existante avec slug "${slug}" — retry se limite a l'update.`)
+        }
+
+        const description = row.description?.trim() || ''
+
+        let imageRef: string | undefined
+        const imageUrl = row.imageUrl?.trim()
+        if (imageUrl) {
+          const uploaded = await mediaApi.uploadFromUrl(imageUrl, `${slug}.png`)
+          imageRef = uploaded.ref
+        }
+
+        const payload = {
+          name,
+          slug,
+          description,
+          ...(imageRef ? { imageRef } : {}),
+        }
+
+        await categoriesApi.update(existingId, payload)
+        retryUpdated += 1
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'Erreur inconnue.'
+        stillFailed.push({ ...failure, error: message })
+      }
+
+      setImportProgress({ done: i + 1, total: failedWithRaw.length })
+    }
+
+    if (retryUpdated > 0) {
+      try {
+        await refreshCategories()
+      } catch {
+        // silencieux
+      }
+    }
+
+    setImportResult({
+      total: importResult.total,
+      created: importResult.created,
+      updated: importResult.updated + retryUpdated,
+      failed: stillFailed,
+    })
+    setIsImporting(false)
+
+    if (stillFailed.length === 0) {
+      pushToast({
+        type: 'success',
+        title: 'Retry termine',
+        message: `${retryUpdated} categorie${retryUpdated > 1 ? 's' : ''} mise${retryUpdated > 1 ? 's' : ''} a jour via update.`,
+      })
+    } else {
+      pushToast({
+        type: 'info',
+        title: 'Retry partiel',
+        message: `${retryUpdated} OK, ${stillFailed.length} echec${stillFailed.length > 1 ? 's' : ''} restant${stillFailed.length > 1 ? 's' : ''}.`,
+      })
+    }
+  }
+
   const columns: Column<Category>[] = [
     {
       key: 'selection',
@@ -557,13 +873,48 @@ export default function CategoriesPage() {
         title="Gestion des catégories"
         description={`${filteredCategories.length} catégorie${filteredCategories.length > 1 ? 's' : ''} dans la structure.`}
         actions={(
-          <button
-            onClick={() => setIsAddModalOpen(true)}
-            className="btn-primary inline-flex items-center gap-2"
-          >
-            <Plus className="h-5 w-5" />
-            Ajouter une catégorie
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              title="Telecharger un fichier CSV modele"
+            >
+              <FileDown className="h-4 w-4" />
+              Template CSV
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenImportPicker}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              <Upload className="h-4 w-4" />
+              Importer CSV
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFileSelected}
+            />
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={categories.length === 0}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Download className="h-4 w-4" />
+              Exporter CSV
+            </button>
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="btn-primary inline-flex items-center gap-2"
+            >
+              <Plus className="h-5 w-5" />
+              Ajouter une catégorie
+            </button>
+          </>
         )}
       />
 
@@ -679,6 +1030,113 @@ export default function CategoriesPage() {
           />
         </div>
       )}
+
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          if (isImporting) return
+          setIsImportModalOpen(false)
+        }}
+        title="Import CSV categories"
+        size="lg"
+      >
+        <div className="space-y-4">
+          {isImporting && importProgress && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm text-gray-700">
+                <span>Import en cours...</span>
+                <span className="font-medium">
+                  {importProgress.done} / {importProgress.total}
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{
+                    width: `${importProgress.total === 0 ? 0 : (importProgress.done / importProgress.total) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {!isImporting && importResult && (
+            <>
+              <div className="grid grid-cols-4 gap-3 text-center">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Total</p>
+                  <p className="text-lg font-semibold text-dark">{importResult.total}</p>
+                </div>
+                <div className="rounded-lg border border-status-success/30 bg-status-success/10 p-3">
+                  <p className="text-xs uppercase tracking-wide text-status-success">Creees</p>
+                  <p className="text-lg font-semibold text-status-success">{importResult.created}</p>
+                </div>
+                <div className="rounded-lg border border-primary/30 bg-primary-light/50 p-3">
+                  <p className="text-xs uppercase tracking-wide text-primary">Mises a jour</p>
+                  <p className="text-lg font-semibold text-primary">{importResult.updated}</p>
+                </div>
+                <div className="rounded-lg border border-status-error/30 bg-status-error/10 p-3">
+                  <p className="text-xs uppercase tracking-wide text-status-error">Echecs</p>
+                  <p className="text-lg font-semibold text-status-error">{importResult.failed.length}</p>
+                </div>
+              </div>
+
+              {importResult.failed.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-gray-700">Lignes en echec :</p>
+                  <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Ligne</th>
+                          <th className="px-3 py-2 text-left">Nom</th>
+                          <th className="px-3 py-2 text-left">Erreur</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {importResult.failed.map((failure) => (
+                          <tr key={`${failure.row}-${failure.name ?? ''}`}>
+                            <td className="px-3 py-2 text-gray-600">#{failure.row}</td>
+                            <td className="px-3 py-2 text-gray-900">{failure.name || '—'}</td>
+                            <td className="px-3 py-2 text-status-error">{failure.error}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {importResult.total === 0 && (
+                <p className="rounded-lg border border-status-warning/30 bg-status-warning/10 p-3 text-sm text-status-warning">
+                  Aucune ligne detectee dans le fichier. Verifie que le CSV a une ligne d&apos;entete et au moins une ligne de donnees.
+                </p>
+              )}
+            </>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            {!isImporting && importResult && importResult.failed.some((f) => f.raw) && (
+              <button
+                type="button"
+                onClick={() => void retryFailedAsUpdate()}
+                className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary-light/50 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary-light"
+                title="Matche chaque ligne en echec a une categorie existante par slug et force un PUT /categories/admin/:id"
+              >
+                Retenter en update des existantes
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={isImporting}
+              onClick={() => setIsImportModalOpen(false)}
+              className="rounded-lg px-4 py-2 text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         isOpen={isDeleteConfirmOpen}

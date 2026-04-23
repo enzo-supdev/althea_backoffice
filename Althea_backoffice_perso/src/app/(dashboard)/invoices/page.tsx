@@ -752,7 +752,7 @@ export default function InvoicesPage() {
     setPreviewDetailLoading(true)
 
     try {
-      const detail = await invoicesApi.getById(invoice.id)
+      const detail = await invoicesApi.getAdminById(invoice.id)
       setPreviewInvoice(detail as unknown as Invoice)
     } catch (error) {
       console.warn('[invoices] Détail facture indisponible, repli sur la liste :', error)

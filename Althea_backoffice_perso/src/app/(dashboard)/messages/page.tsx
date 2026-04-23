@@ -1,11 +1,12 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Mail, MailOpen, Reply } from 'lucide-react'
+import { Mail, MailOpen, Reply, Trash2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
 import Badge from '@/components/ui/Badge'
+import Modal from '@/components/ui/Modal'
 import SearchBar from '@/components/ui/SearchBar'
 import { useToast } from '@/components/ui/ToastProvider'
 import FormField from '@/components/ui/form/FormField'
@@ -45,6 +46,8 @@ export default function MessagesPage() {
   const [chatbotActionLoading, setChatbotActionLoading] = useState(false)
   const [selectedChatbotId, setSelectedChatbotId] = useState<string | null>(null)
   const [selectedChatbotConversation, setSelectedChatbotConversation] = useState<ChatbotConversation | null>(null)
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [isDeletingMessage, setIsDeletingMessage] = useState(false)
   const { pushToast } = useToast()
 
   const replyForm = useForm<ReplyFormValues>({
@@ -357,6 +360,41 @@ export default function MessagesPage() {
     }
   }
 
+  const openDeleteMessage = (messageId: string) => {
+    setDeleteTargetId(messageId)
+  }
+
+  const closeDeleteMessage = () => {
+    setDeleteTargetId(null)
+  }
+
+  const handleDeleteMessage = async () => {
+    if (!deleteTargetId) return
+
+    setIsDeletingMessage(true)
+
+    try {
+      await messagesApi.deleteContactMessage(deleteTargetId)
+      setMessages((current) => current.filter((item) => item.id !== deleteTargetId))
+      setSelectedMessage((current) => (current?.id === deleteTargetId ? null : current))
+      setSelectedMessageId((current) => (current === deleteTargetId ? null : current))
+      pushToast({
+        type: 'success',
+        title: 'Message supprime',
+        message: 'Le ticket support a ete supprime definitivement.',
+      })
+      setDeleteTargetId(null)
+    } catch (error) {
+      pushToast({
+        type: 'error',
+        title: 'Suppression impossible',
+        message: error instanceof ApiError ? error.message : 'La suppression du message a echoue.',
+      })
+    } finally {
+      setIsDeletingMessage(false)
+    }
+  }
+
   const escalateSelectedChatbot = async () => {
     if (!selectedChatbotConversation || selectedChatbotConversation.status === 'escalated') return
 
@@ -659,6 +697,14 @@ export default function MessagesPage() {
                             Clore
                           </button>
                           <button
+                            type="button"
+                            onClick={() => selectedMessageId && openDeleteMessage(selectedMessageId)}
+                            className="inline-flex items-center gap-2 rounded-lg bg-status-error/10 px-4 py-2 text-sm font-medium text-status-error transition-colors hover:bg-status-error/20"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Supprimer
+                          </button>
+                          <button
                             type="submit"
                             disabled={replyForm.formState.isSubmitting || !replyDraft.trim()}
                             className="btn-primary flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -670,9 +716,17 @@ export default function MessagesPage() {
                       </form>
                     </div>
                   ) : (
-                    <div className="border-t border-gray-200 pt-4">
+                    <div className="flex items-center gap-3 border-t border-gray-200 pt-4">
                       <button type="button" onClick={reopenSelected} className="btn-primary">
                         Rouvrir la conversation
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => selectedMessageId && openDeleteMessage(selectedMessageId)}
+                        className="inline-flex items-center gap-2 rounded-lg bg-status-error/10 px-4 py-2 text-sm font-medium text-status-error transition-colors hover:bg-status-error/20"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Supprimer
                       </button>
                     </div>
                   )}
@@ -785,6 +839,37 @@ export default function MessagesPage() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={!!deleteTargetId}
+        onClose={closeDeleteMessage}
+        title="Supprimer le message"
+        size="md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700">
+            Vous allez supprimer ce message de contact de facon definitive. Cette action est irreversible.
+          </p>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={closeDeleteMessage}
+              disabled={isDeletingMessage}
+              className="rounded-lg px-4 py-2 text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Annuler
+            </button>
+            <button
+              type="button"
+              onClick={handleDeleteMessage}
+              disabled={isDeletingMessage}
+              className="rounded-lg bg-status-error px-4 py-2 text-sm text-white transition-colors hover:bg-status-error/90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isDeletingMessage ? 'Suppression...' : 'Confirmer la suppression'}
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

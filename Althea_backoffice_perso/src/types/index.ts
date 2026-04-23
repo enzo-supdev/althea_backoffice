@@ -10,6 +10,7 @@ export interface ProductImage {
 
 export interface Product {
   id: string
+  slug: string
   name: string
   description: string
   price: number
@@ -22,6 +23,7 @@ export interface Product {
   mainImageRef: string | null
   createdAt: Date
   updatedAt: Date
+  deletedAt: Date | null
 }
 
 export interface Category {

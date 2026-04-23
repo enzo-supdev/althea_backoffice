@@ -218,11 +218,11 @@ export interface BulkProductIdsRequest {
 }
 
 export interface BulkProductStatusRequest extends BulkProductIdsRequest {
-  status: 'draft' | 'published' | 'archived';
+  status: 'draft' | 'published';
 }
 
 export interface BulkProductCategoryRequest extends BulkProductIdsRequest {
-  categoryId: string | null;
+  categoryId: string;
 }
 
 export interface ProductImageRequest {
@@ -256,6 +256,7 @@ export interface CreateCategoryRequest {
   name: string;
   slug: string;
   description: string;
+  imageRef?: string;
   parentId?: string;
 }
 
@@ -263,6 +264,7 @@ export interface UpdateCategoryRequest {
   name?: string;
   slug?: string;
   description?: string;
+  imageRef?: string;
   image?: string;
   status?: 'active' | 'inactive';
   parentId?: string;

@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import axios from 'axios'
 import Image from 'next/image'
 import Link from 'next/link'
-import { Plus, Download, Trash2, Edit, Eye } from 'lucide-react'
+import { Plus, Download, Trash2, Edit, Eye, Upload, FileDown } from 'lucide-react'
 import ExportButton from '@/components/ui/ExportButton'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
@@ -16,7 +17,8 @@ import Modal from '@/components/ui/Modal'
 import ProductImageManager from '@/components/ui/ProductImageManager'
 import { useToast } from '@/components/ui/ToastProvider'
 import { Category, Product, ProductImage } from '@/types'
-import { categoriesApi, productsApi, ApiError, resolveMediaUrl } from '@/lib/api'
+import { categoriesApi, productsApi, mediaApi, ApiError, resolveMediaUrl } from '@/lib/api'
+import { buildCsv, downloadCsv, parseCsv } from '@/lib/csv'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import PageHeader from '@/components/layout/PageHeader'
 import FormActions from '@/components/ui/form/FormActions'
@@ -62,6 +64,60 @@ const getProductHeroUrl = (product: Product): string => {
 type AddProductFormValues = z.infer<typeof baseProductFormSchema>
 type EditProductFormValues = z.infer<typeof editProductFormSchema>
 
+type ImportFailure = { row: number; name?: string; error: string; raw?: Record<string, string> }
+type ImportResult = {
+  total: number
+  created: number
+  updated: number
+  failed: ImportFailure[]
+}
+
+function isConflict409(error: unknown): boolean {
+  return axios.isAxiosError(error) && error.response?.status === 409
+}
+
+const CSV_TEMPLATE_COLUMNS = [
+  'name',
+  'slug',
+  'categorySlug',
+  'priceHt',
+  'vatRate',
+  'stock',
+  'status',
+  'description',
+  'imageUrl',
+]
+
+const CSV_TEMPLATE_EXAMPLE_ROWS: string[][] = [
+  [
+    'Stethoscope Classic',
+    'stethoscope-classic',
+    '<slug-de-categorie>',
+    '89.90',
+    '20',
+    '50',
+    'draft',
+    'Stethoscope acoustique double pavillon',
+    'https://placehold.co/600x600/14413c/fff9f0.png?text=Stethoscope+Classic',
+  ],
+  [
+    'Tensiometre Manuel',
+    '',
+    '<slug-de-categorie>',
+    '35.00',
+    '20',
+    '20',
+    'published',
+    'Tensiometre brassard adulte',
+    '',
+  ],
+]
+
+function buildCsvTemplate(): string {
+  return buildCsv(CSV_TEMPLATE_COLUMNS, CSV_TEMPLATE_EXAMPLE_ROWS)
+}
+
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -77,13 +133,20 @@ export default function ProductsPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([])
+  const [deleteForce, setDeleteForce] = useState(false)
   const [viewProduct, setViewProduct] = useState<Product | null>(null)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [filterCategory, setFilterCategory] = useState<string>('all')
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterStock, setFilterStock] = useState<string>('all')
   const [filterDateRange, setFilterDateRange] = useState<string>('all')
+  const [filterDeleted, setFilterDeleted] = useState<'hide' | 'only' | 'all'>('hide')
   const [bulkCategoryId, setBulkCategoryId] = useState<string>('')
+  const [isImporting, setIsImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null)
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const { pushToast } = useToast()
 
   const addProductForm = useForm<AddProductFormValues>({
@@ -241,7 +304,13 @@ export default function ProductsPage() {
         (filterDateRange === '30d' && dayDifference <= 30) ||
         (filterDateRange === '90d' && dayDifference <= 90)
 
-      return matchesSearch && matchesCategory && matchesStatus && matchesStock && matchesDate
+      const isDeleted = Boolean(product.deletedAt)
+      const matchesDeleted =
+        (filterDeleted === 'hide' && !isDeleted) ||
+        (filterDeleted === 'only' && isDeleted) ||
+        filterDeleted === 'all'
+
+      return matchesSearch && matchesCategory && matchesStatus && matchesStock && matchesDate && matchesDeleted
     })
 
     const getSortValue = (product: Product, key: string): string | number => {
@@ -283,7 +352,7 @@ export default function ProductsPage() {
     })
 
     return filtered
-  }, [products, searchQuery, sortKey, sortDirection, filterCategory, filterStatus, filterStock, filterDateRange])
+  }, [products, searchQuery, sortKey, sortDirection, filterCategory, filterStatus, filterStock, filterDateRange, filterDeleted])
 
   // Pagination
   const paginatedProducts = useMemo(() => {
@@ -318,7 +387,7 @@ export default function ProductsPage() {
     setSelectedProducts((prev) => Array.from(new Set([...prev, ...visibleIds])))
   }
 
-  const handleBulkStatusUpdate = async (nextStatus: Product['status']) => {
+  const handleBulkStatusUpdate = async (nextStatus: 'published' | 'draft') => {
     if (selectedProducts.length === 0) return
 
     try {
@@ -380,35 +449,84 @@ export default function ProductsPage() {
     }
   }
 
-  const openDeleteConfirm = (ids: string[]) => {
+  const openDeleteConfirm = (ids: string[], options?: { force?: boolean }) => {
     if (ids.length === 0) return
     setDeleteTargetIds(ids)
+    // Si au moins un produit est deja soft-delete, on coche "force" par defaut
+    // (cas typique : vider la corbeille).
+    const hasSoftDeleted = ids.some((id) => {
+      const product = products.find((p) => p.id === id)
+      return product?.deletedAt != null
+    })
+    setDeleteForce(Boolean(options?.force) || hasSoftDeleted)
     setIsDeleteConfirmOpen(true)
   }
 
   const handleConfirmedDelete = async () => {
-    try {
-      if (deleteTargetIds.length === 1) {
-        await productsApi.delete(deleteTargetIds[0])
+    // Toujours 1 requete par produit (DELETE /products/admin/:id).
+    // Le bulk endpoint est indisponible/bogue sur cette API.
+    const results = await Promise.allSettled(
+      deleteTargetIds.map((id) => productsApi.delete(id, { force: deleteForce })),
+    )
+
+    const succeededIds = deleteTargetIds.filter(
+      (_, index) => results[index].status === 'fulfilled',
+    )
+    const failed = results
+      .map((result, index) => ({ result, id: deleteTargetIds[index] }))
+      .filter((entry) => entry.result.status === 'rejected') as Array<{
+        result: PromiseRejectedResult
+        id: string
+      }>
+
+    if (succeededIds.length > 0) {
+      const succeededSet = new Set(succeededIds)
+      if (deleteForce) {
+        // Hard delete : on retire definitivement du state.
+        setProducts((prev) => prev.filter((product) => !succeededSet.has(product.id)))
       } else {
-        await productsApi.bulkDelete({ productIds: deleteTargetIds })
+        // Soft delete : on marque deletedAt pour que le filtre "corbeille" affiche.
+        setProducts((prev) =>
+          prev.map((product) =>
+            succeededSet.has(product.id)
+              ? { ...product, deletedAt: new Date(), updatedAt: new Date() }
+              : product,
+          ),
+        )
       }
-      const targetIds = new Set(deleteTargetIds)
-      setProducts((prev) => prev.filter((product) => !targetIds.has(product.id)))
-      setSelectedProducts((prev) => prev.filter((id) => !targetIds.has(id)))
-      setIsDeleteConfirmOpen(false)
-      setDeleteTargetIds([])
+      setSelectedProducts((prev) => prev.filter((id) => !succeededSet.has(id)))
+    }
+
+    if (failed.length === 0) {
       pushToast({
         type: 'success',
-        title: 'Suppression effectuee',
-        message: 'La selection de produits a ete supprimee.',
+        title: deleteForce ? 'Suppression definitive' : 'Suppression effectuee',
+        message: deleteForce
+          ? `${succeededIds.length} produit${succeededIds.length > 1 ? 's' : ''} purge${succeededIds.length > 1 ? 's' : ''}.`
+          : `${succeededIds.length} produit${succeededIds.length > 1 ? 's' : ''} en corbeille.`,
       })
-    } catch (error) {
+      setIsDeleteConfirmOpen(false)
+      setDeleteTargetIds([])
+      setDeleteForce(false)
+    } else {
+      const firstError = failed[0].result.reason
+      const firstErrorMessage =
+        firstError instanceof ApiError
+          ? firstError.message
+          : firstError instanceof Error
+            ? firstError.message
+            : 'La suppression a echoue.'
       pushToast({
         type: 'error',
-        title: 'Erreur suppression',
-        message: error instanceof ApiError ? error.message : 'La suppression a echoue.',
+        title:
+          succeededIds.length > 0 ? 'Suppression partielle' : 'Suppression impossible',
+        message:
+          succeededIds.length > 0
+            ? `${succeededIds.length} OK, ${failed.length} echec${failed.length > 1 ? 's' : ''}. Premier motif : ${firstErrorMessage}`
+            : `${failed.length} echec${failed.length > 1 ? 's' : ''}. Premier motif : ${firstErrorMessage}`,
       })
+      // Garde les ids en echec pour retenter.
+      setDeleteTargetIds(failed.map((entry) => entry.id))
     }
   }
 
@@ -530,6 +648,356 @@ export default function ProductsPage() {
       })
     }
   })
+
+  const handleDownloadTemplate = () => {
+    downloadCsv('produits-template.csv', buildCsvTemplate())
+  }
+
+  const handleOpenImportPicker = () => {
+    setImportResult(null)
+    setImportProgress(null)
+    fileInputRef.current?.click()
+  }
+
+  const runImport = async (file: File) => {
+    setIsImportModalOpen(true)
+    setIsImporting(true)
+    setImportResult(null)
+
+    let rows: Record<string, string>[] = []
+    try {
+      const text = await file.text()
+      rows = parseCsv(text)
+    } catch {
+      setIsImporting(false)
+      pushToast({
+        type: 'error',
+        title: 'Lecture CSV impossible',
+        message: 'Le fichier est vide ou illisible.',
+      })
+      setIsImportModalOpen(false)
+      return
+    }
+
+    if (rows.length === 0) {
+      setIsImporting(false)
+      setImportResult({ total: 0, created: 0, updated: 0, failed: [] })
+      return
+    }
+
+    const categoryBySlug = new Map(
+      categories.map((category) => [category.slug.toLowerCase(), category.id]),
+    )
+    const upsertedProducts: Product[] = []
+    const failed: ImportFailure[] = []
+    let created = 0
+    let updated = 0
+
+    // Pre-charge la liste admin pour resoudre les slugs existants en un seul
+    // appel. La route publique GET /products/:slug exclut les drafts et renvoie
+    // une forme imbriquee, donc on prefere la liste admin comme source.
+    let existingBySlug = new Map<string, string>()
+    try {
+      const existingAdmin = await productsApi.listBackoffice()
+      existingBySlug = new Map(
+        existingAdmin.map((p) => [p.slug.toLowerCase(), p.id]),
+      )
+    } catch {
+      // On continue sans cache — chaque ligne retombera en fallback 409+refetch.
+    }
+
+    setImportProgress({ done: 0, total: rows.length })
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index]
+      const rowNumber = index + 2
+      try {
+        const name = row.name?.trim()
+        if (!name) throw new Error('Colonne "name" vide.')
+
+        const rawCategorySlug = (row.categorySlug || row.category || '').trim().toLowerCase()
+        if (!rawCategorySlug) throw new Error('Colonne "categorySlug" vide.')
+        const categoryId = categoryBySlug.get(rawCategorySlug)
+        if (!categoryId) throw new Error(`Categorie introuvable pour le slug "${rawCategorySlug}".`)
+
+        const priceHtRaw = (row.priceHt || row.priceHT || row.prix_ht || '').replace(',', '.')
+        const priceHt = Number(priceHtRaw)
+        if (!Number.isFinite(priceHt) || priceHt < 0) {
+          throw new Error(`priceHt invalide : "${row.priceHt}".`)
+        }
+
+        const vatRaw = (row.vatRate || row.tva || '').replace(',', '.')
+        const vatRate = vatRaw === '' ? 20 : Number(vatRaw)
+        if (![0, 5.5, 10, 20].includes(vatRate)) {
+          throw new Error(`vatRate non supporte : "${row.vatRate}". Valeurs : 0, 5.5, 10, 20.`)
+        }
+
+        const stockRaw = row.stock ?? ''
+        const stock = stockRaw === '' ? 0 : Number(stockRaw)
+        if (!Number.isInteger(stock) || stock < 0) {
+          throw new Error(`stock invalide : "${row.stock}".`)
+        }
+
+        const statusRaw = (row.status || 'draft').toLowerCase()
+        if (statusRaw !== 'draft' && statusRaw !== 'published') {
+          throw new Error(`status invalide : "${row.status}". Valeurs : draft, published.`)
+        }
+
+        const slug = row.slug?.trim() || toSlug(name)
+
+        let mainImageRef: string | undefined
+        const imageUrl = row.imageUrl?.trim()
+        if (imageUrl) {
+          try {
+            const uploaded = await mediaApi.uploadFromUrl(imageUrl, `${slug}.png`)
+            mainImageRef = uploaded.ref
+          } catch (imageError) {
+            const msg =
+              imageError instanceof Error ? imageError.message : 'upload image echoue'
+            throw new Error(`Image "${imageUrl}" : ${msg}`)
+          }
+        }
+
+        const payload = {
+          name,
+          slug,
+          description: row.description?.trim() || '',
+          shortDescription: '',
+          priceHt,
+          vatRate,
+          stock,
+          categoryId,
+          status: statusRaw as 'draft' | 'published',
+          ...(mainImageRef ? { mainImageRef } : {}),
+        }
+
+        const updatePayload = {
+          name: payload.name,
+          slug: payload.slug,
+          description: payload.description,
+          shortDescription: payload.shortDescription,
+          priceHt: payload.priceHt,
+          vatRate: payload.vatRate,
+          stock: payload.stock,
+          categoryId: payload.categoryId,
+          status: payload.status,
+          ...(mainImageRef ? { mainImageRef } : {}),
+        }
+
+        const cachedId = existingBySlug.get(slug.toLowerCase())
+        if (cachedId) {
+          const updatedProduct = await productsApi.update(cachedId, updatePayload)
+          upsertedProducts.push(updatedProduct)
+          updated += 1
+        } else {
+          try {
+            const createdProduct = await productsApi.create(payload)
+            existingBySlug.set(slug.toLowerCase(), createdProduct.id)
+            upsertedProducts.push(createdProduct)
+            created += 1
+          } catch (createError) {
+            if (!isConflict409(createError)) throw createError
+
+            // Race ou cache obsolete : refetch et retry via update.
+            const refreshed = await productsApi.listBackoffice()
+            existingBySlug = new Map(
+              refreshed.map((p) => [p.slug.toLowerCase(), p.id]),
+            )
+            const foundId = existingBySlug.get(slug.toLowerCase())
+            if (!foundId) {
+              throw new Error('Conflit 409 mais produit introuvable apres refetch.')
+            }
+            const updatedProduct = await productsApi.update(foundId, updatePayload)
+            upsertedProducts.push(updatedProduct)
+            updated += 1
+          }
+        }
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'Erreur inconnue.'
+        failed.push({ row: rowNumber, name: row.name, error: message, raw: row })
+      }
+
+      setImportProgress({ done: index + 1, total: rows.length })
+    }
+
+    if (upsertedProducts.length > 0) {
+      const upsertedIds = new Set(upsertedProducts.map((p) => p.id))
+      setProducts((prev) => [
+        ...upsertedProducts,
+        ...prev.filter((p) => !upsertedIds.has(p.id)),
+      ])
+    }
+
+    setImportResult({ total: rows.length, created, updated, failed })
+    setIsImporting(false)
+
+    const succeeded = created + updated
+
+    if (failed.length === 0 && succeeded > 0) {
+      pushToast({
+        type: 'success',
+        title: 'Import termine',
+        message: `${created} cree${created > 1 ? 's' : ''}, ${updated} mis a jour.`,
+      })
+    } else if (succeeded > 0) {
+      pushToast({
+        type: 'info',
+        title: 'Import partiel',
+        message: `${created} crees, ${updated} mis a jour, ${failed.length} echec${failed.length > 1 ? 's' : ''}.`,
+      })
+    } else {
+      pushToast({
+        type: 'error',
+        title: 'Import echoue',
+        message: 'Aucune ligne n a pu etre importee.',
+      })
+    }
+  }
+
+  const handleImportFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    void runImport(file)
+  }
+
+  const retryFailedAsUpdate = async () => {
+    if (!importResult) return
+    const failedWithRaw = importResult.failed.filter((f) => f.raw)
+    if (failedWithRaw.length === 0) return
+
+    setIsImporting(true)
+    setImportProgress({ done: 0, total: failedWithRaw.length })
+
+    // Fresh cache pour matcher les slugs.
+    let productBySlug = new Map<string, string>()
+    try {
+      const adminList = await productsApi.listBackoffice()
+      productBySlug = new Map(adminList.map((p) => [p.slug.toLowerCase(), p.id]))
+    } catch {
+      // On continue sans cache — le lookup echouera ligne par ligne si besoin.
+    }
+
+    const categoryBySlug = new Map(
+      categories.map((category) => [category.slug.toLowerCase(), category.id]),
+    )
+
+    const stillFailed: ImportFailure[] = []
+    const upserted: Product[] = []
+    let retryUpdated = 0
+
+    for (let i = 0; i < failedWithRaw.length; i++) {
+      const failure = failedWithRaw[i]
+      const row = failure.raw as Record<string, string>
+      try {
+        const name = row.name?.trim()
+        if (!name) throw new Error('Colonne "name" vide.')
+
+        const rawCategorySlug = (row.categorySlug || row.category || '').trim().toLowerCase()
+        if (!rawCategorySlug) throw new Error('Colonne "categorySlug" vide.')
+        const categoryId = categoryBySlug.get(rawCategorySlug)
+        if (!categoryId) throw new Error(`Categorie introuvable pour le slug "${rawCategorySlug}".`)
+
+        const priceHtRaw = (row.priceHt || row.priceHT || row.prix_ht || '').replace(',', '.')
+        const priceHt = Number(priceHtRaw)
+        if (!Number.isFinite(priceHt) || priceHt < 0) {
+          throw new Error(`priceHt invalide : "${row.priceHt}".`)
+        }
+
+        const vatRaw = (row.vatRate || row.tva || '').replace(',', '.')
+        const vatRate = vatRaw === '' ? 20 : Number(vatRaw)
+        if (![0, 5.5, 10, 20].includes(vatRate)) {
+          throw new Error(`vatRate non supporte : "${row.vatRate}".`)
+        }
+
+        const stockRaw = row.stock ?? ''
+        const stock = stockRaw === '' ? 0 : Number(stockRaw)
+        if (!Number.isInteger(stock) || stock < 0) {
+          throw new Error(`stock invalide : "${row.stock}".`)
+        }
+
+        const statusRaw = (row.status || 'draft').toLowerCase()
+        if (statusRaw !== 'draft' && statusRaw !== 'published') {
+          throw new Error(`status invalide : "${row.status}".`)
+        }
+
+        const slug = row.slug?.trim() || toSlug(name)
+        const existingId = productBySlug.get(slug.toLowerCase())
+        if (!existingId) {
+          throw new Error(`Aucun produit existant avec slug "${slug}" — retry se limite a l'update.`)
+        }
+
+        let mainImageRef: string | undefined
+        const imageUrl = row.imageUrl?.trim()
+        if (imageUrl) {
+          const uploaded = await mediaApi.uploadFromUrl(imageUrl, `${slug}.png`)
+          mainImageRef = uploaded.ref
+        }
+
+        const updatePayload = {
+          name,
+          slug,
+          description: row.description?.trim() || '',
+          shortDescription: '',
+          priceHt,
+          vatRate,
+          stock,
+          categoryId,
+          status: statusRaw as 'draft' | 'published',
+          ...(mainImageRef ? { mainImageRef } : {}),
+        }
+
+        const updatedProduct = await productsApi.update(existingId, updatePayload)
+        upserted.push(updatedProduct)
+        retryUpdated += 1
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : error instanceof Error
+              ? error.message
+              : 'Erreur inconnue.'
+        stillFailed.push({ ...failure, error: message })
+      }
+
+      setImportProgress({ done: i + 1, total: failedWithRaw.length })
+    }
+
+    if (upserted.length > 0) {
+      const upsertedIds = new Set(upserted.map((p) => p.id))
+      setProducts((prev) => [
+        ...upserted,
+        ...prev.filter((p) => !upsertedIds.has(p.id)),
+      ])
+    }
+
+    setImportResult({
+      total: importResult.total,
+      created: importResult.created,
+      updated: importResult.updated + retryUpdated,
+      failed: stillFailed,
+    })
+    setIsImporting(false)
+
+    if (stillFailed.length === 0) {
+      pushToast({
+        type: 'success',
+        title: 'Retry termine',
+        message: `${retryUpdated} produit${retryUpdated > 1 ? 's' : ''} mis a jour via update.`,
+      })
+    } else {
+      pushToast({
+        type: 'info',
+        title: 'Retry partiel',
+        message: `${retryUpdated} OK, ${stillFailed.length} echec${stillFailed.length > 1 ? 's' : ''} restant${stillFailed.length > 1 ? 's' : ''}.`,
+      })
+    }
+  }
 
   const handleBulkExport = (format: 'csv' | 'excel') => {
     if (selectedProducts.length === 0) return
@@ -691,16 +1159,24 @@ export default function ProductsPage() {
       label: 'Statut',
       sortable: true,
       render: (product) => (
-        <button
-          type="button"
-          onClick={() => handleRowStatusToggle(product.id)}
-          title={product.status === 'published' ? 'Cliquer pour mettre en brouillon' : 'Cliquer pour publier'}
-          className="rounded transition-opacity hover:opacity-70"
-        >
-          <Badge variant={product.status === 'published' ? 'success' : 'default'}>
-            {product.status === 'published' ? 'Publié' : 'Brouillon'}
-          </Badge>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleRowStatusToggle(product.id)}
+            title={product.status === 'published' ? 'Cliquer pour mettre en brouillon' : 'Cliquer pour publier'}
+            className="rounded transition-opacity hover:opacity-70"
+            disabled={Boolean(product.deletedAt)}
+          >
+            <Badge variant={product.status === 'published' ? 'success' : 'default'}>
+              {product.status === 'published' ? 'Publié' : 'Brouillon'}
+            </Badge>
+          </button>
+          {product.deletedAt && (
+            <span title={`Soft-delete le ${formatDate(product.deletedAt)}`}>
+              <Badge variant="error">Corbeille</Badge>
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -751,6 +1227,30 @@ export default function ProductsPage() {
         description={`${filteredProducts.length} produit${filteredProducts.length > 1 ? 's' : ''} dans le catalogue.`}
         actions={(
           <>
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              title="Telecharger un fichier CSV modele"
+            >
+              <FileDown className="h-4 w-4" />
+              Template CSV
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenImportPicker}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            >
+              <Upload className="h-4 w-4" />
+              Importer CSV
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={handleImportFileSelected}
+            />
             <ExportButton
               fetcher={() => productsApi.exportCsv()}
               filename={`produits-${new Date().toISOString().slice(0, 10)}.csv`}
@@ -830,6 +1330,19 @@ export default function ProductsPage() {
             <option value="7d">7 derniers jours</option>
             <option value="30d">30 derniers jours</option>
             <option value="90d">90 derniers jours</option>
+          </select>
+          <select
+            value={filterDeleted}
+            onChange={(e) => {
+              setFilterDeleted(e.target.value as 'hide' | 'only' | 'all')
+              setCurrentPage(1)
+            }}
+            className="input-base bg-shell-surface"
+            aria-label="Filtrer par corbeille"
+          >
+            <option value="hide">Corbeille masquee</option>
+            <option value="only">Corbeille seulement</option>
+            <option value="all">Tout (actifs + corbeille)</option>
           </select>
         </div>
 
@@ -940,7 +1453,113 @@ export default function ProductsPage() {
         </div>
       )}
 
-      {/* Modal d'ajout */}
+      <Modal
+        isOpen={isImportModalOpen}
+        onClose={() => {
+          if (isImporting) return
+          setIsImportModalOpen(false)
+        }}
+        title="Import CSV produits"
+        size="lg"
+      >
+        <div className="space-y-4">
+          {isImporting && importProgress && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm text-gray-700">
+                <span>Import en cours...</span>
+                <span className="font-medium">
+                  {importProgress.done} / {importProgress.total}
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-gray-200">
+                <div
+                  className="h-full bg-primary transition-all"
+                  style={{
+                    width: `${importProgress.total === 0 ? 0 : (importProgress.done / importProgress.total) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {!isImporting && importResult && (
+            <>
+              <div className="grid grid-cols-4 gap-3 text-center">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xs uppercase tracking-wide text-gray-500">Total</p>
+                  <p className="text-lg font-semibold text-dark">{importResult.total}</p>
+                </div>
+                <div className="rounded-lg border border-status-success/30 bg-status-success/10 p-3">
+                  <p className="text-xs uppercase tracking-wide text-status-success">Crees</p>
+                  <p className="text-lg font-semibold text-status-success">{importResult.created}</p>
+                </div>
+                <div className="rounded-lg border border-primary/30 bg-primary-light/50 p-3">
+                  <p className="text-xs uppercase tracking-wide text-primary">Mis a jour</p>
+                  <p className="text-lg font-semibold text-primary">{importResult.updated}</p>
+                </div>
+                <div className="rounded-lg border border-status-error/30 bg-status-error/10 p-3">
+                  <p className="text-xs uppercase tracking-wide text-status-error">Echecs</p>
+                  <p className="text-lg font-semibold text-status-error">{importResult.failed.length}</p>
+                </div>
+              </div>
+
+              {importResult.failed.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-gray-700">Lignes en echec :</p>
+                  <div className="max-h-64 overflow-y-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+                        <tr>
+                          <th className="px-3 py-2 text-left">Ligne</th>
+                          <th className="px-3 py-2 text-left">Nom</th>
+                          <th className="px-3 py-2 text-left">Erreur</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200">
+                        {importResult.failed.map((failure) => (
+                          <tr key={`${failure.row}-${failure.name ?? ''}`}>
+                            <td className="px-3 py-2 text-gray-600">#{failure.row}</td>
+                            <td className="px-3 py-2 text-gray-900">{failure.name || '—'}</td>
+                            <td className="px-3 py-2 text-status-error">{failure.error}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {importResult.total === 0 && (
+                <p className="rounded-lg border border-status-warning/30 bg-status-warning/10 p-3 text-sm text-status-warning">
+                  Aucune ligne detectee dans le fichier. Verifie que le CSV a une ligne d&apos;entete et au moins une ligne de donnees.
+                </p>
+              )}
+            </>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2">
+            {!isImporting && importResult && importResult.failed.some((f) => f.raw) && (
+              <button
+                type="button"
+                onClick={() => void retryFailedAsUpdate()}
+                className="inline-flex items-center gap-2 rounded-lg border border-primary bg-primary-light/50 px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary-light"
+                title="Matche chaque ligne en echec a un produit existant par slug et force un PUT /products/admin/:id"
+              >
+                Retenter en update des existants
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={isImporting}
+              onClick={() => setIsImportModalOpen(false)}
+              className="rounded-lg px-4 py-2 text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Fermer
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <Modal
         isOpen={isDeleteConfirmOpen}
         onClose={() => setIsDeleteConfirmOpen(false)}
@@ -949,8 +1568,28 @@ export default function ProductsPage() {
       >
         <div className="space-y-4">
           <p className="text-sm text-gray-700">
-            Vous allez supprimer {deleteTargetIds.length} produit{deleteTargetIds.length > 1 ? 's' : ''}. Cette action est irreversible.
+            Vous allez supprimer {deleteTargetIds.length} produit{deleteTargetIds.length > 1 ? 's' : ''}.
+            {deleteForce
+              ? ' Cette action sera definitive (purge DB via ?force=true).'
+              : ' Par defaut l\'API fait un soft delete : les produits restent en base avec un flag deletedAt.'}
           </p>
+
+          <label className="flex items-start gap-3 rounded-lg border border-status-error/30 bg-status-error/5 p-3 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={deleteForce}
+              onChange={(event) => setDeleteForce(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-status-error focus:ring-status-error"
+            />
+            <span>
+              <span className="font-medium text-status-error">Suppression definitive (hard delete)</span>
+              <br />
+              Ajoute <code className="rounded bg-gray-100 px-1 text-xs">?force=true</code> a la requete.
+              A utiliser pour purger la corbeille. Si l&apos;API ne supporte pas ce parametre, l&apos;effet
+              sera identique a un soft delete.
+            </span>
+          </label>
+
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
@@ -964,7 +1603,7 @@ export default function ProductsPage() {
               onClick={handleConfirmedDelete}
               className="rounded-lg bg-status-error px-4 py-2 text-sm text-white transition-colors hover:bg-status-error/90"
             >
-              Confirmer la suppression
+              {deleteForce ? 'Purger definitivement' : 'Confirmer la suppression'}
             </button>
           </div>
         </div>

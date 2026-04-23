@@ -53,6 +53,38 @@ export const mediaApi = {
   },
 
   /**
+   * Fetch une URL externe (placeholder, CDN, Unsplash...) puis uploade le
+   * binaire via POST /media/upload. Renvoie la `ref` du fichier uploade.
+   * Utile pour l'import CSV : on colle une URL publique dans la colonne
+   * `imageUrl` au lieu d'avoir a uploader chaque image a la main.
+   */
+  async uploadFromUrl(url: string, filename: string): Promise<MediaUploadResponse> {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`fetch URL ${response.status} ${response.statusText}`);
+    }
+    const blob = await response.blob();
+    const type = blob.type || 'image/png';
+    const file = new File([blob], filename, { type });
+    try {
+      return await mediaApi.upload(file);
+    } catch (uploadErr: any) {
+      // Enrichit l'erreur avec le corps de la reponse pour diagnostiquer les 400.
+      const status = uploadErr?.response?.status;
+      const body = uploadErr?.response?.data;
+      const detail =
+        typeof body === 'string'
+          ? body
+          : body?.error?.message ?? body?.message ?? JSON.stringify(body ?? {}).slice(0, 300);
+      const mime = type;
+      const size = blob.size;
+      throw new Error(
+        `POST /media/upload ${status ?? '?'} (mime=${mime}, size=${size}o, name=${filename})${detail ? ` : ${detail}` : ''}`,
+      );
+    }
+  },
+
+  /**
    * GET /media/:ref — renvoie le Blob du fichier. Pas d'auth requise.
    * Pour un simple affichage <img>, utiliser directement resolveMediaUrl(ref).
    */

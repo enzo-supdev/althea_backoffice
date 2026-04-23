@@ -15,6 +15,16 @@ import {
   SendUserEmailRequest,
 } from './types';
 
+function isSoftDeletedUser(user: any): boolean {
+  // L'API soft-delete (DELETE /admin/users/:id, deleteType SOFT) met le status
+  // a DELETED et peut renvoyer un deletedAt. La liste admin peut encore les
+  // renvoyer, on les masque cote client.
+  if (!user) return false;
+  if (user.deletedAt || user.deleted_at) return true;
+  const status = typeof user.status === 'string' ? user.status.toLowerCase() : '';
+  return status === 'deleted';
+}
+
 function mapUserToLegacy(user: User): any {
   const firstName = user.firstName ?? '';
   const lastName = user.lastName ?? '';
@@ -45,7 +55,7 @@ export const usersApi = {
    */
   async list(): Promise<any[]> {
     const { data } = await axiosInstance.get<PaginatedResponse<User>>('/admin/users');
-    return data.data.map(mapUserToLegacy);
+    return data.data.filter((u) => !isSoftDeletedUser(u)).map(mapUserToLegacy);
   },
 
   /**
@@ -67,7 +77,7 @@ export const usersApi = {
     const { data } = await axiosInstance.get<PaginatedResponse<User>>('/admin/users', { params });
     return {
       ...data,
-      data: data.data.map(mapUserToLegacy),
+      data: data.data.filter((u) => !isSoftDeletedUser(u)).map(mapUserToLegacy),
     };
   },
 

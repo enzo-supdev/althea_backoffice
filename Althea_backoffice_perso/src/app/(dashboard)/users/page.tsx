@@ -26,6 +26,10 @@ export default function UsersPage() {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
   const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false)
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([])
+  const [deleteType, setDeleteType] = useState<'SOFT' | 'HARD'>('SOFT')
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleteAnonymize, setDeleteAnonymize] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false)
   const [resetTargetId, setResetTargetId] = useState<string | null>(null)
   const [isArchiveConfirmOpen, setIsArchiveConfirmOpen] = useState(false)
@@ -209,22 +213,76 @@ export default function UsersPage() {
   const openDeleteConfirm = (ids: string[]) => {
     if (ids.length === 0) return
     setDeleteTargetIds(ids)
+    setDeleteType('SOFT')
+    setDeleteReason('')
+    setDeleteAnonymize(false)
     setIsDeleteConfirmOpen(true)
   }
 
-  const handleConfirmedDelete = async () => {
-    const targetIds = new Set(deleteTargetIds)
-    const nextUsers: User[] = users.filter((user) => !targetIds.has(user.id))
-    await persistUsers(nextUsers)
-    setSelectedUsers((prev) => prev.filter((id) => !targetIds.has(id)))
+  const closeDeleteConfirm = () => {
     setIsDeleteConfirmOpen(false)
     setDeleteTargetIds([])
+    setDeleteReason('')
+    setDeleteAnonymize(false)
+    setDeleteType('SOFT')
+  }
 
-    pushToast({
-      type: 'success',
-      title: 'Comptes supprimes',
-      message: 'La suppression a ete effectuee.',
-    })
+  const handleConfirmedDelete = async () => {
+    const trimmedReason = deleteReason.trim()
+    if (!trimmedReason) {
+      pushToast({
+        type: 'error',
+        title: 'Motif requis',
+        message: 'Indiquez un motif de suppression pour tracer la conformite RGPD.',
+      })
+      return
+    }
+
+    setIsDeleting(true)
+
+    const payload = {
+      deleteType,
+      reason: trimmedReason,
+      ...(deleteType === 'HARD' ? { anonymize: deleteAnonymize } : {}),
+    }
+
+    const results = await Promise.allSettled(
+      deleteTargetIds.map((id) => usersApi.delete(id, payload)),
+    )
+
+    const succeededIds = deleteTargetIds.filter(
+      (_, index) => results[index].status === 'fulfilled',
+    )
+    const failed = results.filter((result) => result.status === 'rejected') as PromiseRejectedResult[]
+
+    if (succeededIds.length > 0) {
+      const succeededSet = new Set(succeededIds)
+      setUsers((prev) => prev.filter((user) => !succeededSet.has(user.id)))
+      setSelectedUsers((prev) => prev.filter((id) => !succeededSet.has(id)))
+    }
+
+    if (failed.length === 0) {
+      pushToast({
+        type: 'success',
+        title: 'Comptes supprimes',
+        message: `${succeededIds.length} utilisateur${succeededIds.length > 1 ? 's' : ''} supprime${succeededIds.length > 1 ? 's' : ''} (${deleteType === 'SOFT' ? 'soft' : 'hard'}).`,
+      })
+      closeDeleteConfirm()
+    } else {
+      const firstError = failed[0].reason
+      pushToast({
+        type: 'error',
+        title: succeededIds.length > 0 ? 'Suppression partielle' : 'Suppression impossible',
+        message:
+          firstError instanceof ApiError
+            ? firstError.message
+            : `La suppression a echoue pour ${failed.length} compte${failed.length > 1 ? 's' : ''}.`,
+      })
+      // Garde les ids restants dans la cible pour permettre un nouvel essai.
+      setDeleteTargetIds((prev) => prev.filter((id) => !succeededIds.includes(id)))
+    }
+
+    setIsDeleting(false)
   }
 
   const handleSingleStatusUpdate = async (userId: string, nextStatus: User['status']) => {
@@ -590,7 +648,7 @@ export default function UsersPage() {
 
       <Modal
         isOpen={isDeleteConfirmOpen}
-        onClose={() => setIsDeleteConfirmOpen(false)}
+        onClose={closeDeleteConfirm}
         title="Confirmer la suppression"
         size="md"
       >
@@ -603,20 +661,62 @@ export default function UsersPage() {
               Avertissement RGPD: cette suppression doit etre justifiee et tracer la base legale de retention/suppression des donnees personnelles.
             </p>
           </div>
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="user-delete-type" className="block text-sm font-medium text-gray-700">
+                Type de suppression
+              </label>
+              <select
+                id="user-delete-type"
+                value={deleteType}
+                onChange={(event) => setDeleteType(event.target.value as 'SOFT' | 'HARD')}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              >
+                <option value="SOFT">Soft — compte desactive, donnees conservees</option>
+                <option value="HARD">Hard — suppression definitive</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="user-delete-reason" className="block text-sm font-medium text-gray-700">
+                Motif <span className="text-status-error">*</span>
+              </label>
+              <textarea
+                id="user-delete-reason"
+                rows={3}
+                value={deleteReason}
+                onChange={(event) => setDeleteReason(event.target.value)}
+                placeholder="Ex: demande utilisateur, compte frauduleux, conformite RGPD..."
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+            {deleteType === 'HARD' && (
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={deleteAnonymize}
+                  onChange={(event) => setDeleteAnonymize(event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                Anonymiser les commandes passees (recommande)
+              </label>
+            )}
+          </div>
           <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
-              onClick={() => setIsDeleteConfirmOpen(false)}
-              className="rounded-lg px-4 py-2 text-gray-700 transition-colors hover:bg-gray-100"
+              onClick={closeDeleteConfirm}
+              disabled={isDeleting}
+              className="rounded-lg px-4 py-2 text-gray-700 transition-colors hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Annuler
             </button>
             <button
               type="button"
               onClick={handleConfirmedDelete}
-              className="rounded-lg bg-status-error px-4 py-2 text-sm text-white transition-colors hover:bg-status-error/90"
+              disabled={isDeleting}
+              className="rounded-lg bg-status-error px-4 py-2 text-sm text-white transition-colors hover:bg-status-error/90 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Confirmer la suppression
+              {isDeleting ? 'Suppression...' : 'Confirmer la suppression'}
             </button>
           </div>
         </div>

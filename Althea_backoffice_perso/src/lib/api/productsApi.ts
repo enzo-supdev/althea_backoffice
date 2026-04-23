@@ -79,6 +79,8 @@ function mapProductToLegacy(product: any): any {
     createdAt: new Date(product.createdAt),
   };
 
+  const deletedAtRaw = product.deletedAt ?? product.deleted_at ?? null;
+
   return {
     ...product,
     price: product.priceTtc ?? product.price ?? product.priceHt ?? 0,
@@ -89,6 +91,7 @@ function mapProductToLegacy(product: any): any {
     mainImageRef: product.mainImageRef ?? null,
     createdAt: new Date(product.createdAt),
     updatedAt: new Date(product.updatedAt),
+    deletedAt: deletedAtRaw ? new Date(deletedAtRaw) : null,
   };
 }
 
@@ -169,13 +172,16 @@ export const productsApi = {
 
   /**
    * GET /products/:slug
-   * Détail d'un produit par slug
+   * Détail d'un produit par slug — l'API retourne { data: { product, images } }.
    */
   async getBySlug(slug: string): Promise<LegacyProduct> {
-    const { data } = await axiosInstance.get<ApiResponse<Product>>(
+    const { data } = await axiosInstance.get<ApiResponse<any>>(
       `/products/${slug}`
     );
-    return mapProductToLegacy(data.data);
+    const payload = data.data;
+    const product = payload?.product ?? payload;
+    const images = payload?.images ?? product?.images ?? [];
+    return mapProductToLegacy({ ...product, images });
   },
 
   /**
@@ -271,23 +277,34 @@ export const productsApi = {
 
   /**
    * DELETE /products/admin/:id
-   * Supprime un produit
+   * Soft delete par defaut. `{ force: true }` tente un hard delete via
+   * `?force=true` (parametre repandu cote backend avec soft-delete).
    */
-  async delete(id: string): Promise<{ message: string }> {
+  async delete(
+    id: string,
+    opts?: { force?: boolean },
+  ): Promise<{ message: string }> {
     const { data } = await axiosInstance.delete<ApiResponse<{ message: string }>>(
-      `/products/admin/${id}`
+      `/products/admin/${id}`,
+      opts?.force ? { params: { force: true } } : undefined,
     );
     return data.data;
   },
 
   /**
    * DELETE /products/admin/bulk
-   * Supprime plusieurs produits
+   * Supprime plusieurs produits. `{ force: true }` tente un hard delete.
    */
-  async bulkDelete(input: BulkProductIdsRequest): Promise<any> {
+  async bulkDelete(
+    input: BulkProductIdsRequest,
+    opts?: { force?: boolean },
+  ): Promise<any> {
     const { data } = await axiosInstance.delete<ApiResponse<any>>(
       '/products/admin/bulk',
-      { data: input }
+      {
+        data: input,
+        ...(opts?.force ? { params: { force: true } } : {}),
+      },
     );
     return data.data;
   },
